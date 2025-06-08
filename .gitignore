@@ -1,0 +1,33 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# 编辑器和IDE配置
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# 日志文件
+logs/
+*.log
+
+# 数据和输出
+data/qlib
+datasets/*.csv
+datasets/*.h5
+datasets/*.npz
+datasets/*.npy
+datasets/*.zip
+*.db
+*.sqlite3
+
+# Jupyter Notebook checkpoint
+.

@@ -1,0 +1,4 @@
+﻿# 依赖列表
+# 虚拟环境依赖
+pyqlib[all]
+jupyter
