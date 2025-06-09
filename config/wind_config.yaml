@@ -1,0 +1,81 @@
+# Wind数据处理配置文件
+
+# 基础路径配置
+paths:
+  data_dir: "data"                # 数据根目录
+  raw_dir: "data/raw/wind"        # Wind原始数据目录
+  processed_dir: "data/processed" # 处理后的数据目录
+  qlib_dir: "data/qlib"          # Qlib数据目录
+  log_dir: "logs"                # 日志存储路径
+  temp_dir: "temp"               # 临时文件存储路径
+
+# Wind API配置
+wind:
+  retry_times: 3                 # API调用重试次数
+  retry_interval: 60             # 重试间隔（秒）
+  batch_size: 100               # 批量下载大小
+  timeout: 60                   # API超时时间（秒）
+
+# 数据范围配置
+data:
+  start_date: "2023-12-01"      # 历史数据起始日期
+  end_date: "2023-12-31"        # 历史数据结束日期
+  universe: "A"                 # 股票范围：A-全部A股
+  max_stocks: 10               # 最大股票数量，设置为0表示不限制
+  fields:                       # 需要下载的字段
+    - "open"                    # 开盘价，Wind代码：OPEN
+    - "high"                    # 最高价，Wind代码：HIGH
+    - "low"                     # 最低价，Wind代码：LOW
+    - "close"                   # 收盘价，Wind代码：CLOSE
+    - "volume"                  # 成交量，Wind代码：VOLUME
+    - "amt"                     # 成交额，Wind代码：AMT
+    - "turn"                    # 换手率，Wind代码：TURN
+    - "trade_status"            # 交易状态，Wind代码：TRADE_STATUS
+    - "adjfactor"              # 复权因子，Wind代码：ADJFACTOR
+
+# 增量更新配置
+incremental:
+  enabled: true                 # 是否启用增量更新
+  update_time: "15:30"          # 每日更新时间
+  check_time: "16:00"          # 数据检查时间
+  weekend_check: true          # 是否在周末进行完整性检查
+
+# 存储配置
+storage:
+  format: "parquet"             # 存储格式
+  compression: "snappy"         # 压缩方式
+  partition_by: "year"          # 分区方式
+
+# 并行处理配置
+parallel:
+  max_workers: 4               # 最大工作进程数
+  chunk_size: 1000            # 数据块大小
+  memory_limit: "8GB"         # 内存限制
+
+# 日志配置
+logging:
+  level: "INFO"                # 日志级别
+  rotation: "500 MB"           # 日志文件大小限制
+  retention: "10 days"         # 日志保留时间
+
+# 数据验证配置
+validation:
+  check_missing: true          # 检查缺失值
+  check_anomaly: true         # 检查异常值
+  threshold:
+    missing_rate: 0.1         # 缺失率阈值
+    price_change: 0.2        # 价格变动阈值
+    volume_change: 5.0       # 成交量变动阈值
+
+# 告警配置
+alert:
+  enabled: true               # 是否启用告警
+  methods:                    # 告警方式
+    - email
+    - log
+  email:
+    smtp_server: "smtp.example.com"
+    smtp_port: 587
+    sender: "alert@example.com"
+    receivers:
+      - "admin@example.com" 

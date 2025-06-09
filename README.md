@@ -124,7 +124,10 @@ source .venv/bin/activate
 
 ```bash
 pip install --upgrade pip
-pip install -r requirements.txt
+# pip install -r requirements.txt
+# pip install .
+# 可编辑安装
+pip install -e .
 ```
 
 ---
