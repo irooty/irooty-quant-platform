@@ -75,6 +75,13 @@ quant-platform/
 
 以下为 `irooty-quant-platform` 项目使用步骤，推荐使用 Python 内置的 `venv` 虚拟环境方式管理依赖：
 
+## 环境要求
+
+- **Python 版本**：建议 3.11.x
+- 依赖包安装方法见 requirements.txt
+
+### 推荐使用虚拟环境，并指定 Python 3.11 版本：
+
 ---
 
 ### 1. 克隆项目 / 解压
