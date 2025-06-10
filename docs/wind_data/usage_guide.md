@@ -37,14 +37,58 @@
   loguru
   ```
 
-### 3. 目录结构
+## 3. 运行说明
+
+### 3.1 完整数据下载
+用于首次下载或重新下载全部数据：
+
+```bash
+python scripts/download_wind_data.py --config config/wind_config.yaml
+```
+查看下载的数据结构：
+```bash
+python scripts/check_wind_data.py
+```
+
+### 3.2 增量数据更新
+有两种运行模式：
+
+1. 单次更新：
+```bash
+python scripts/update_wind_data.py --config config/wind_config.yaml
+```
+
+2. 定时更新（后台运行）：
+```bash
+# Windows (PowerShell):
+Start-Process python -ArgumentList "scripts/update_wind_data.py --scheduler --config config/wind_config.yaml" -NoNewWindow
+
+# Linux/Mac:
+nohup python scripts/update_wind_data.py --scheduler --config config/wind_config.yaml > wind_update.log 2>&1 &
+```
+
+## 4. 数据目录结构
+
 ```
 data/
-  ├── raw/
-  │   └── wind/          # Wind原始数据
-  ├── processed/         # 处理后的数据
-  └── qlib/             # Qlib格式数据
+├── raw/                    # 原始数据
+│   └── wind/
+│       ├── stock_list.parquet   # 股票列表
+│       └── batch_*.parquet      # 批次数据
+├── processed/              # 处理后的数据
+│   └── cleaned_data.parquet
+└── qlib/                  # Qlib格式数据
+    ├── calendars/         # 交易日历
+    ├── instruments/       # 标的列表
+    └── features/         # 特征数据
 ```
+
+## 5. 日志查看
+
+日志文件位于 `logs/` 目录下：
+- `wind_data_pipeline.log`: 完整下载日志
+- `wind_data_update.log`: 增量更新日志
+- `wind_data_scheduler.log`: 定时任务日志
 
 ## 配置说明
 

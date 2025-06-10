@@ -28,23 +28,84 @@ class DataCleaner:
     
     def _load_raw_data(self) -> pd.DataFrame:
         """
-        加载原始数据
+        加载原始数据并转换格式
         
         Returns:
-            pd.DataFrame: 合并后的原始数据
+            pd.DataFrame: 转换后的数据，包含 date、stock_code 和各个字段的列
         """
         dfs = []
-        for file in self.raw_dir.glob('batch_*.parquet'):
+        batch_files = list(self.raw_dir.glob('batch_*.parquet'))
+        self.logger.info(f"找到 {len(batch_files)} 个批次文件")
+        
+        for file in batch_files:
             try:
+                self.logger.info(f"正在处理文件: {file}")
+                
+                # 加载原始数据（宽格式，日期在索引中）
                 df = load_parquet(file)
-                dfs.append(df)
+                self.logger.info(f"成功加载数据，形状: {df.shape}")
+                self.logger.info(f"列名: {df.columns.tolist()[:5]}...")
+                self.logger.info(f"索引类型: {type(df.index)}")
+                
+                # 重置索引，将日期变成列
+                df = df.reset_index()
+                self.logger.info(f"重置索引后的列: {df.columns.tolist()[:5]}...")
+                
+                # 处理多层级列名
+                if isinstance(df.columns[0], tuple):
+                    self.logger.info("检测到多层级列名，开始转换...")
+                    # 将多层级列名转换为单层级
+                    new_columns = []
+                    for col in df.columns:
+                        if isinstance(col, tuple):
+                            field, stock = col
+                            new_columns.append(f"{field}_{stock}")
+                        else:
+                            new_columns.append(col)
+                    df.columns = new_columns
+                    
+                    # 获取所有字段名和股票代码
+                    fields = sorted(set(col.split('_')[0] for col in df.columns if '_' in col))
+                    stocks = sorted(set(col.split('_')[1] for col in df.columns if '_' in col))
+                    
+                    self.logger.info(f"字段列表: {fields}")
+                    self.logger.info(f"股票列表: {stocks[:5]}...")
+                    
+                    # 创建结果DataFrame
+                    result_rows = []
+                    for idx, row in df.iterrows():
+                        date_val = row.iloc[0]  # 假设第一列是日期
+                        for stock in stocks:
+                            stock_data = {'date': date_val, 'stock_code': stock}
+                            for field in fields:
+                                col_name = f"{field}_{stock}"
+                                if col_name in df.columns:
+                                    stock_data[field] = row[col_name]
+                            result_rows.append(stock_data)
+                    
+                    df_transformed = pd.DataFrame(result_rows)
+                    self.logger.info(f"转换后的数据形状: {df_transformed.shape}")
+                    dfs.append(df_transformed)
+                else:
+                    self.logger.warning(f"文件 {file} 不是预期的多层级列名格式")
+                
             except Exception as e:
-                self.logger.error(f"加载文件 {file} 失败: {e}")
+                self.logger.error(f"加载文件 {file} 失败: {e}", exc_info=True)
         
         if not dfs:
             raise ValueError("没有找到原始数据文件")
         
-        return pd.concat(dfs, ignore_index=True)
+        # 合并所有批次的数据
+        df_final = pd.concat(dfs, ignore_index=True)
+        self.logger.info(f"合并后的数据形状: {df_final.shape}")
+        
+        # 确保日期列的类型是datetime
+        df_final['date'] = pd.to_datetime(df_final['date'])
+        
+        # 按日期和股票代码排序
+        df_final = df_final.sort_values(['date', 'stock_code'])
+        
+        return df_final
     
     def _handle_missing_values(self, df: pd.DataFrame) -> pd.DataFrame:
         """

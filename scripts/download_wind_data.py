@@ -38,7 +38,8 @@ def main():
         # 3. 转换为Qlib格式
         logger.info("第3步：转换为Qlib格式")
         converter = QlibConverter(config)
-        converter.convert_to_qlib()
+        if not converter.convert_to_qlib():
+            raise RuntimeError("数据转换失败")
         
         logger.info("数据处理流程完成")
         

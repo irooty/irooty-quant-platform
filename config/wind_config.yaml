@@ -4,10 +4,10 @@
 paths:
   data_dir: "data"                # 数据根目录
   raw_dir: "data/raw/wind"        # Wind原始数据目录
-  processed_dir: "data/processed" # 处理后的数据目录
-  qlib_dir: "data/qlib"          # Qlib数据目录
+  processed_dir: "data/processed/wind"   # 处理后的数据目录
+  qlib_dir: "data/qlib/wind_convert"     # Qlib数据目录
   log_dir: "logs"                # 日志存储路径
-  temp_dir: "temp"               # 临时文件存储路径
+  temp_dir: "data/temp"          # 临时文件存储路径
 
 # Wind API配置
 wind:
@@ -55,8 +55,8 @@ parallel:
 # 日志配置
 logging:
   level: "INFO"                # 日志级别
-  rotation: "500 MB"           # 日志文件大小限制
-  retention: "10 days"         # 日志保留时间
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "wind_data.log"        # 日志文件名
 
 # 数据验证配置
 validation:
