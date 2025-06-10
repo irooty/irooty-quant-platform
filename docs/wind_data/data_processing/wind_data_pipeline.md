@@ -7,7 +7,7 @@
 
 ### 1.2 系统架构
 ```
-项目根目录/
+irooty-quant-platform/
 ├── datasets/                    # 数据处理相关代码
 │   └── wind/                   # Wind数据处理模块
 │       ├── __init__.py
