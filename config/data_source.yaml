@@ -1,0 +1,36 @@
+# 数据源配置文件
+
+# 通用配置
+data_path: data/raw  # 原始数据保存路径
+qlib_data_path: data/qlib  # Qlib格式数据保存路径
+
+# Baostock配置
+baostock:
+  downloader:
+    module: datasets.datasource.baostock.downloader
+    class: BaostockDownloader
+  converter:
+    module: datasets.datasource.baostock.converter
+    class: BaostockToQlibConverter
+  config:
+    start_date: '2025-05-01'  # 数据开始日期
+    end_date: null  # 数据结束日期，null表示当前日期
+    fields:
+      daily: date,code,open,high,low,close,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM
+      dividend: date,code,dividPreNoticeDate,dividAgmPumDate,dividPlanAnnounceDate,dividPlanDate,dividRegistDate,dividOperateDate,dividPayDate,dividCashPsBeforeTax,dividCashPsAfterTax,dividStocksPs,dividCashStock,dividReserveToStockPs
+    stock_list_fields: code,code_name,industry,industry_classification
+
+# Wind配置
+wind:
+  downloader:
+    module: datasets.datasource.wind.downloader
+    class: WindDownloader
+  converter:
+    module: datasets.datasource.wind.converter
+    class: WindConverter
+  config:
+    start_date: '2010-01-01'
+    end_date: null
+    fields:
+      daily: trade_date,open,high,low,close,volume,amt,turn,chg_pct,pe_ttm,pb_lf,ps_ttm,pcf_ncf_ttm
+      dividend: ann_date,div_proc,div_cash_beftax,div_cash_afttax,div_stock,div_stock_trans,div_stock_ratio,div_stock_trans_ratio,record_date,ex_date,pay_date 

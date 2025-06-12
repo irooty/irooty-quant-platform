@@ -1,0 +1,47 @@
+# Baostock数据下载配置
+data_path: 'data/raw/baostock'  # 数据保存路径
+start_date: '2010-01-01'  # 数据开始日期
+end_date: null  # 数据结束日期，null表示使用当前日期
+
+# 数据字段配置
+fields:
+  daily:  # 日线数据字段
+    - date  # 交易日期
+    - code  # 证券代码
+    - open  # 开盘价
+    - high  # 最高价
+    - low   # 最低价
+    - close  # 收盘价
+    - volume  # 成交量
+    - amount  # 成交额
+    - adjustflag  # 复权类型
+    - turn  # 换手率
+    - tradestatus  # 交易状态
+    - pctChg  # 涨跌幅
+    - peTTM  # 滚动市盈率
+    - pbMRQ  # 市净率
+    - psTTM  # 滚动市销率
+    - pcfNcfTTM  # 滚动市现率
+  
+  dividend:  # 分红数据字段
+    - date  # 公告日期
+    - code  # 证券代码
+    - dividPreNoticeDate  # 预批露公告日期
+    - dividAgmPumDate  # 股东大会公告日期
+    - dividPlanAnnounceDate  # 预案公告日期
+    - dividPlanDate  # 分红实施公告日期
+    - dividRegistDate  # 股权登记日期
+    - dividOperateDate  # 除权除息日期
+    - dividPayDate  # 派息日
+    - dividCashPsBeforeTax  # 每股股利税前
+    - dividCashPsAfterTax  # 每股股利税后
+    - dividStocksPs  # 每股送股比例
+    - dividCashStock  # 股票股利
+    - dividReserveToStockPs  # 每股转增比例
+
+# 股票列表字段
+stock_list_fields:
+  - code  # 证券代码
+  - code_name  # 证券名称
+  - industry  # 所属行业
+  - industry_classification  # 行业分类 

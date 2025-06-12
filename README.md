@@ -150,6 +150,64 @@ python backtest/run_qlib_backtest.py
 
 ---
 
+### 7. 统一的数据获取入口
+
+```
+irooty-quant-platform/
+├── datasets/                 # 数据集处理模块
+│   ├── download.py           # 统一的数据下载接口，定义通用的数据获取流程
+│   ├── preprocess.py         # 数据预处理模块，包含数据清洗、特征工程等功能
+│   ├── loader.py             # 数据加载模块，提供统一的数据加载接口
+│   └── datasource/               # 数据源实现模块
+│       ├── __init__.py           # 定义数据源的基类和通用接口
+│       ├── baostock/             # Baostock数据源实现
+│       │   ├── __init__.py       # Baostock模块初始化
+│       │   ├── downloader.py     # Baostock数据下载实现
+│       │   └── converter.py      # Baostock数据转换为Qlib格式的实现
+│       └── wind/                 # Wind数据源实现
+│           ├── __init__.py       # Wind模块初始化
+│           ├── downloader.py     # Wind数据下载实现
+│           └── converter.py      # Wind数据转换为Qlib格式的实现
+
+├── config/
+│   └── data_source.yaml    # 统一的数据源配置
+├── scripts/
+│   └── fetch_data.py       # 统一的数数据下载入口
+```
+分层架构设计
+- 入口层（fetch_data.py）
+    - 仅负责命令行参数解析
+    - 将解析后的参数传递给调度层
+    - 不包含任何业务逻辑判断
+    - 保持简单和纯粹
+- 调度层（datasets/download.py）
+    - 作为统一的调度中心
+    - 根据参数决定使用哪个数据源
+    - 决定是否需要数据转换
+    - 调用具体的数据源实现
+    - 调用具体的数据转换实现
+    - 处理数据流程的编排
+- 实现层（datasets/datasource/）
+    - 包含具体数据源的实现
+    - 每个数据源独立实现下载逻辑
+    - 每个数据源独立实现转换逻辑
+    - 保持实现层的纯粹性
+
+
+在配置文件中选择数据源：
+```bash
+# config/data_source.yaml
+data_source: 'wind'  # 或 'baostock'
+```
+运行数据获取脚本：
+```bash
+python scripts/fetch_data.py --source baostock
+# 或
+python scripts/fetch_data.py --source baostock --convert --start-date 2020-01-01 --end-date 2021-01-01
+```
+
+---
+
 ### 📌 小贴士
 
 - 所有路径和配置参数集中于 `config/` 目录下；
