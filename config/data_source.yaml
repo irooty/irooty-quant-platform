@@ -1,8 +1,17 @@
 # 数据源配置文件
 
 # 通用配置
-data_path: data/raw  # 原始数据保存路径
-qlib_data_path: data/qlib  # Qlib格式数据保存路径
+common:
+  data_path: data/raw  # 原始数据保存路径
+  qlib_data_path: data/qlib  # Qlib格式数据保存路径
+  start_date: '2010-01-01'  # 默认开始日期
+  end_date: null  # 默认结束日期，null表示当前日期
+  download:
+    concurrent_limit: 5  # 并发下载限制
+    min_request_interval: 0.5  # 最小请求间隔(秒)
+    max_retries: 3  # 最大重试次数
+    chunk_size: 1000  # 每批处理的股票数量
+    compress: true  # 是否压缩存储
 
 # Baostock配置
 baostock:
@@ -13,8 +22,8 @@ baostock:
     module: datasets.datasource.baostock.converter
     class: BaostockToQlibConverter
   config:
-    start_date: '2025-05-01'  # 数据开始日期
-    end_date: null  # 数据结束日期，null表示当前日期
+    # 继承通用配置，可以覆盖
+    # start_date: '2025-06-01'  # 覆盖通用配置的开始日期
     fields:
       daily: date,code,open,high,low,close,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM
       dividend: date,code,dividPreNoticeDate,dividAgmPumDate,dividPlanAnnounceDate,dividPlanDate,dividRegistDate,dividOperateDate,dividPayDate,dividCashPsBeforeTax,dividCashPsAfterTax,dividStocksPs,dividCashStock,dividReserveToStockPs
@@ -29,8 +38,7 @@ wind:
     module: datasets.datasource.wind.converter
     class: WindConverter
   config:
-    start_date: '2010-01-01'
-    end_date: null
+    # 继承通用配置，可以覆盖
     fields:
       daily: trade_date,open,high,low,close,volume,amt,turn,chg_pct,pe_ttm,pb_lf,ps_ttm,pcf_ncf_ttm
       dividend: ann_date,div_proc,div_cash_beftax,div_cash_afttax,div_stock,div_stock_trans,div_stock_ratio,div_stock_trans_ratio,record_date,ex_date,pay_date 

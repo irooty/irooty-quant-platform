@@ -60,7 +60,8 @@ def main():
         
         # 下载数据
         logger.info(f"开始从 {args.source} 下载数据...")
-        downloader.batch_download_daily_data(
+        # 使用同步方法调用
+        downloader.run_batch_download(
             start_date=args.start_date,
             end_date=args.end_date
         )
