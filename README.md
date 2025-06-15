@@ -194,16 +194,13 @@ irooty-quant-platform/
     - 保持实现层的纯粹性
 
 
-在配置文件中选择数据源：
-```bash
-# config/data_source.yaml
-data_source: 'wind'  # 或 'baostock'
-```
 运行数据获取脚本：
 ```bash
-python scripts/fetch_data.py --source baostock
-# 或
-python scripts/fetch_data.py --source baostock --convert --start-date 2020-01-01 --end-date 2021-01-01
+  python scripts/fetch_data.py --provider=baostock
+  # 或
+  python scripts/fetch_data.py --provider=baostock --stock_list=sh.600000,sz.000001
+  # 或
+  python scripts/fetch_data.py --provider=baostock --convert --start-date=2020-01-01 --end-date=2021-01-01 --stock_list=sh.600000
 ```
 
 ---

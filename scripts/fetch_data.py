@@ -3,35 +3,53 @@
 
 import os
 import sys
-import argparse
-from datetime import datetime
-from loguru import logger
-
-# 添加项目根目录到Python路径
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
+import fire
 from utils.path_utils import get_config_path
-from datasets.datasource.baostock.downloader import BaostockDownloader
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='下载股票数据')
-    parser.add_argument('--source', type=str, required=True, help='数据源，如：baostock')
-    parser.add_argument('--start-date', type=str, help='开始日期，格式：YYYY-MM-DD')
-    parser.add_argument('--end-date', type=str, help='结束日期，格式：YYYY-MM-DD')
-    return parser.parse_args()
+def main(
+    provider,  # 金融数据提供方，如 baostock
+    config: str = get_config_path('market_provider.yaml'),  # 配置文件路径
+    start_date: str = None,  # 开始日期，格式：YYYY-MM-DD
+    end_date: str = None,    # 结束日期，格式：YYYY-MM-DD
+    convert: bool = False,   # 是否转换为Qlib格式
+    stock_codes: str = None,  # 要下载的股票列表，逗号分隔字符串
+    interval: str = '1d'     # 数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
+):
+    """
+    股票数据下载工具
 
-def main():
-    args = parse_args()
+    参数说明:
+      --provider     金融数据提供方（如 baostock）【必填】
+      --config       配置文件路径，默认 market_provider.yaml
+      --start_date   开始日期，格式：YYYY-MM-DD
+      --end_date     结束日期，格式：YYYY-MM-DD
+      --convert      是否转换为Qlib格式，布尔值
+      --stock_codes  要下载的股票列表，逗号分隔，如 sh.600000,sz.000001
+      --interval     数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
+    """
+    # 添加项目根目录到Python路径
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+
+    # 构造命令行参数转发给 download.py
+    cmd = [
+        sys.executable, 'datasets/download.py',
+        '--config', config,
+        '--provider', provider
+    ]
+    if start_date:
+        cmd += ['--start-date', start_date]
+    if end_date:
+        cmd += ['--end-date', end_date]
+    if convert:
+        cmd.append('--convert')
+    if stock_codes:
+        cmd += ['--stock-codes', stock_codes]
+    if interval:
+        cmd += ['--interval', interval]
     
-    if args.source.lower() == 'baostock':
-        downloader = BaostockDownloader()
-        downloader.run_batch_download(
-            start_date=args.start_date,
-            end_date=args.end_date
-        )
-    else:
-        logger.error(f'不支持的数据源: {args.source}')
+    import subprocess
+    subprocess.run(cmd, check=True)
 
 if __name__ == '__main__':
-    main()
+    fire.Fire(main)

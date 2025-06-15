@@ -3,9 +3,9 @@
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Union
-import pandas as pd
-from datetime import datetime
-from loguru import logger
+import os
+import yaml
+from utils.path_utils import get_config_path
 
 class BaseDownloader(ABC):
     """数据下载器基类
@@ -13,171 +13,80 @@ class BaseDownloader(ABC):
     并实现其抽象方法
     """
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(
+        self,
+        config_path: str = None,
+        provider: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        convert: bool = False,
+        interval: str = '1d',
+        stock_codes: list = None
+    ):
         """初始化下载器
         
         Args:
             config_path: 配置文件路径，默认为None
+            provider: 金融数据提供方名称，用于加载对应的配置
+            start_date: 开始日期，格式：YYYY-MM-DD
+            end_date: 结束日期，格式：YYYY-MM-DD
+            convert: 是否转换为Qlib格式，默认为False
+            interval: 数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
+            stock_codes: 要下载的股票代码列表，默认为None
         """
-        self.config = self._load_config(config_path)
+        self.provider = provider
+        self.start_date = start_date
+        self.end_date = end_date
+        self.convert = convert
+        self.interval = interval
+        self.stock_codes = stock_codes
+        self.config = self._load_config(config_path, provider)
+
+    def _load_config(self, config_path: Optional[str], provider: str) -> Dict[str, Any]:
+        """加载配置文件，合并通用配置和数据源专属配置
         
-    @abstractmethod
-    def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
-        """加载配置文件
+        配置合并规则：
+        1. 以通用配置为基础
+        2. 数据源专属配置覆盖通用配置
+        3. 如果专属配置未指定data_path，则使用通用配置的data_path/{market_provider}
         
         Args:
             config_path: 配置文件路径
+            provider: 金融数据提供方
             
         Returns:
-            Dict[str, Any]: 配置信息字典
+            Dict[str, Any]: 合并后的配置
         """
-        pass
-    
-    @abstractmethod
-    def download_stock_list(self) -> pd.DataFrame:
-        """下载股票列表
-        
-        Returns:
-            pd.DataFrame: 股票列表数据，包含股票代码、名称等信息
-        """
-        pass
-    
-    @abstractmethod
-    def download_daily_data(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
-        """下载单个股票的日线数据
-        
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
+        if config_path is None:
+            config_path = get_config_path('market_provider.yaml')
+
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+
+        # 读取配置文件
+        with open(config_path, 'r', encoding='utf-8') as f:
+            full_config = yaml.safe_load(f)
             
-        Returns:
-            pd.DataFrame: 日线数据
-        """
-        pass
-    
-    @abstractmethod
-    def download_minute_data(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None, 
-                           frequency: str = '1min') -> pd.DataFrame:
-        """下载单个股票的分钟线数据
+        # 1. 获取通用配置
+        common_config = full_config.get('common', {})
         
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-            frequency: 分钟线频率，可选值：'1min', '5min', '15min', '30min', '60min'
+        # 2. 获取数据源专属配置
+        provider_config = full_config.get(provider, {}).get('config', {})
+        
+        # 3. 合并配置（从下到上覆盖）
+        config = common_config.copy()  # 以通用配置为基础
+        config.update(provider_config)  # 专属配置覆盖通用配置
+
+        # 4. 特殊处理data_path
+        if not provider_config.get('data_path'):
+            config['data_path'] = os.path.join(common_config.get('data_path', 'data/raw'), provider)
             
-        Returns:
-            pd.DataFrame: 分钟线数据
-        """
-        pass
+        return config
     
+
     @abstractmethod
-    def download_tick_data(self, stock_code: str, trade_date: str) -> pd.DataFrame:
-        """下载单个股票的逐笔成交数据
-        
-        Args:
-            stock_code: 股票代码
-            trade_date: 交易日期，格式：YYYY-MM-DD
-            
-        Returns:
-            pd.DataFrame: 逐笔成交数据
+    def batch_download(self) -> None:
+        """批量下载股票数据
+        将股票列表分块处理，每块并发下载，避免创建过多任务
         """
         pass
-    
-    @abstractmethod
-    def download_level2_data(self, stock_code: str, trade_date: str) -> pd.DataFrame:
-        """下载单个股票的Level-2行情数据
-        
-        Args:
-            stock_code: 股票代码
-            trade_date: 交易日期，格式：YYYY-MM-DD
-            
-        Returns:
-            pd.DataFrame: Level-2行情数据
-        """
-        pass
-    
-    @abstractmethod
-    def download_dividend_data(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
-        """下载分红数据
-        
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-            
-        Returns:
-            pd.DataFrame: 分红数据
-        """
-        pass
-    
-    @abstractmethod
-    def download_financial_data(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
-        """下载财务数据
-        
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-            
-        Returns:
-            pd.DataFrame: 财务数据
-        """
-        pass
-    
-    @abstractmethod
-    async def batch_download_daily_data(self, stock_codes: Optional[List[str]] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
-        """异步批量下载日线数据
-        
-        Args:
-            stock_codes: 股票代码列表，如果为None则下载所有股票
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-        """
-        pass
-    
-    @abstractmethod
-    async def batch_download_minute_data(self, stock_codes: Optional[List[str]] = None, start_date: Optional[str] = None, 
-                                       end_date: Optional[str] = None, frequency: str = '1min') -> None:
-        """异步批量下载分钟线数据
-        
-        Args:
-            stock_codes: 股票代码列表，如果为None则下载所有股票
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-            frequency: 分钟线频率，可选值：'1min', '5min', '15min', '30min', '60min'
-        """
-        pass
-    
-    @abstractmethod
-    async def batch_download_tick_data(self, stock_codes: Optional[List[str]] = None, trade_date: Optional[str] = None) -> None:
-        """异步批量下载逐笔成交数据
-        
-        Args:
-            stock_codes: 股票代码列表，如果为None则下载所有股票
-            trade_date: 交易日期，格式：YYYY-MM-DD
-        """
-        pass
-    
-    @abstractmethod
-    async def batch_download_level2_data(self, stock_codes: Optional[List[str]] = None, trade_date: Optional[str] = None) -> None:
-        """异步批量下载Level-2行情数据
-        
-        Args:
-            stock_codes: 股票代码列表，如果为None则下载所有股票
-            trade_date: 交易日期，格式：YYYY-MM-DD
-        """
-        pass
-    
-    def run_batch_download(self, stock_codes: Optional[List[str]] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
-        """运行批量下载
-        同步方法，用于在同步环境中启动异步下载任务
-        
-        Args:
-            stock_codes: 股票代码列表，如果为None则下载所有股票
-            start_date: 开始日期，格式：YYYY-MM-DD
-            end_date: 结束日期，格式：YYYY-MM-DD
-        """
-        import asyncio
-        asyncio.run(self.batch_download_daily_data(stock_codes, start_date, end_date)) 

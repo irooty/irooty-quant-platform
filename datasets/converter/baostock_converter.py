@@ -18,7 +18,7 @@ class BaostockConverter(BaseConverter):
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """加载配置文件"""
         if config_path is None:
-            config_path = Path(__file__).parent.parent / 'config' / 'data_source.yaml'
+            config_path = Path(__file__).parent.parent / 'config' / 'market_provider.yaml'
         
         with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)

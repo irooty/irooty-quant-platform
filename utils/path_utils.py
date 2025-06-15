@@ -15,7 +15,7 @@ def get_config_path(config_name):
     获取配置文件的绝对路径。
     
     Args:
-        config_name: 配置文件名，如 'data_source.yaml'
+        config_name: 配置文件名，如 'market_provider.yaml'
     
     Returns:
         str: 配置文件的绝对路径
@@ -43,4 +43,4 @@ def get_qlib_data_dir(config_path="config/paths.yaml"):
 # 使用举例
 if __name__ == "__main__":
     print(get_qlib_data_dir())
-    print(get_config_path("data_source.yaml"))
+    print(get_config_path("market_provider.yaml"))
