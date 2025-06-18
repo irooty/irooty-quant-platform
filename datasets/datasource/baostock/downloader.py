@@ -1,4 +1,6 @@
 import os
+import threading
+
 import baostock as bs
 import pandas as pd
 from datetime import datetime, timedelta
@@ -53,7 +55,9 @@ class BaostockDownloader(BaseDownloader):
             stock_codes=stock_codes
         )
         # 登录系统
-        self.login()
+        # self.login()
+        lg = bs.logout()
+        print(lg)
         # 初始化股票池列表
         if self.stock_codes is None:
             stock_df = self.download_stock_list()
@@ -138,7 +142,9 @@ class BaostockDownloader(BaseDownloader):
         获取所有股票的基本信息
         """
         logger.info('开始下载股票池列表...')
-        stock_rs = self._make_request(self.bs.query_stock_basic)
+        result = bs.query_stock_basic()
+        print(result)
+        stock_rs = self._make_request(bs.query_stock_basic)
         stock_df = self._process_result(stock_rs)
         logger.info(f'下载股票列表{len(stock_df)}支')
 
@@ -187,30 +193,44 @@ class BaostockDownloader(BaseDownloader):
         :param failed_stocks: 失败列表
         :return:
         """
+        lock = threading.Lock()
         def _download_single_stock(stock_code):
-            try:
-                self.download_daily_data(stock_code)
-                self.download_dividend_data(stock_code)
-                return self.NORMAL_FLAG
-            except Exception as e:
-                logger.error(f"下载 {stock_code} 失败: {e}")
-                return stock_code
+            with lock:
+                try:
+                    self.download_daily_data(stock_code)
+                    self.download_dividend_data(stock_code)
+                    return self.NORMAL_FLAG
+                except Exception as e:
+                    logger.error(f"下载 {stock_code} 失败: {e}")
+                    return stock_code
 
         # 使用进程池进行并发下载，每个进程都会有自己的登录状态
-        # 存在莫名其妙的问题
-        # res = Parallel(n_jobs=self.config.get('download', {}).get('max_workers', 4), prefer="threads")(
-        #     delayed(_download_single_stock)(_stock) for _stock in tqdm(chunk)
-        # )
+        res = Parallel(n_jobs=self.config.get('download', {}).get('max_workers', 4))(
+            delayed(_download_single_stock)(_stock) for _stock in tqdm(chunk)
+        )
 
         # 使用单线程顺序下载
-        for stock_code in tqdm(chunk):
-            result = _download_single_stock(stock_code)
-            if result != self.NORMAL_FLAG:
-                failed_stocks.append(stock_code)
+        # for stock_code in tqdm(chunk):
+        #     result = _download_single_stock(stock_code)
+        #     if result != self.NORMAL_FLAG:
+        #         failed_stocks.append(stock_code)
 
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         logger.info(f"当前批次股票数量: {len(chunk)}")
         return failed_stocks
+
+    @staticmethod
+    def get_daily_data_remote(
+            code: str, fields:str, start_date: str, end_date: str, interval: str
+    ):
+        return bs.query_history_k_data_plus(
+            code,
+            fields=fields,
+            start_date=start_date,
+            end_date=end_date,
+            frequency=interval,
+            adjustflag="3",
+        )
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
         """下载单个股票的日线数据
@@ -239,15 +259,17 @@ class BaostockDownloader(BaseDownloader):
                     logger.info(f'{stock_code} 日线数据已是最新')
                     return pd.read_csv(file_path)
 
-        rs = self._make_request(
-            self.bs.query_history_k_data_plus,
-            code=stock_code,
-            fields=fields,
-            start_date=start_date,
-            end_date=end_date,
-            frequency='d',
-            adjustflag='3'
-        )
+        # rs = self._make_request(
+        #     self.bs.query_history_k_data_plus,
+        #     code=stock_code,
+        #     fields=fields,
+        #     start_date=start_date,
+        #     end_date=end_date,
+        #     frequency='d',
+        #     adjustflag='3'
+        # )
+        # 静态调用
+        rs = BaostockDownloader.get_daily_data_remote(stock_code, fields, start_date, end_date,'d')
 
         df = self._process_result(rs)
         if not df.empty:
@@ -267,6 +289,16 @@ class BaostockDownloader(BaseDownloader):
             # logger.info(f'日线数据已保存至: {file_path}')
 
         return df
+
+    @staticmethod
+    def get_dividend_data_remote(
+            code: str, start_date: str
+    ):
+        return bs.query_dividend_data(
+            code,
+            year=start_date.split('-')[0],
+            yearType='report'
+        )
 
     def download_dividend_data(self, stock_code: str) -> pd.DataFrame:
         """下载分红数据
@@ -296,12 +328,13 @@ class BaostockDownloader(BaseDownloader):
                     logger.info(f'{stock_code} 分红数据已是最新')
                     return pd.read_csv(file_path)
 
-        rs = self._make_request(
-            self.bs.query_dividend_data,
-            code=stock_code,
-            year=start_date.split('-')[0],
-            yearType='report'
-        )
+        # rs = self._make_request(
+        #     self.bs.query_dividend_data,
+        #     code=stock_code,
+        #     year=start_date.split('-')[0],
+        #     yearType='report'
+        # )
+        rs = BaostockDownloader.get_dividend_data_remote(stock_code, start_date)
 
         df = self._process_result(rs)
         if not df.empty:
