@@ -45,7 +45,7 @@ class BaostockDownloader(BaseDownloader):
         self.last_request_time = 0  # 初始化最后请求时间
         self.min_request_interval = 0.5  # 最小请求间隔（秒）
         self.NORMAL_FLAG = "NORMAL"  # 标记正常下载的股票
-        self.lock = threading.Lock() # 初始化一把锁，用于调用Baostock API，因为它不支持多线程
+        # self.lock = threading.Lock() # 初始化一把锁，用于调用Baostock API，因为它不支持多线程
         super().__init__(
             config_path=config_path,
             provider=provider,
@@ -90,20 +90,11 @@ class BaostockDownloader(BaseDownloader):
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     def _make_request(self, func, *args, **kwargs):
+        """发送请求，支持自动重试和频率限制
+        使用指数退避算法进行重试，避免频繁重试对服务器造成压力
         """
-        封装 Baostock 所有 API 的原子调用（加锁 + 节流 + 重试）
-
-        Args:
-            func: baostock API 函数，如 self.bs.query_stock_basic
-            *args: 位置参数
-            **kwargs: 关键字参数
-
-        Returns:
-            返回 baostock 的原始结果对象（可继续 .next() / .get_row_data()）
-        """
-        with self.lock:
-            self._wait_for_rate_limit()
-            return func(*args, **kwargs)
+        self._wait_for_rate_limit()
+        return func(*args, **kwargs)
 
     def _process_result(self, rs):
         """处理查询结果"""
@@ -185,6 +176,7 @@ class BaostockDownloader(BaseDownloader):
 
         for chunk_idx, chunk in enumerate(stock_chunks, 1):
             logger.info(f"批次 {chunk_idx}/{len(stock_chunks)}")
+            logger.info(f"当前批次股票数量: {len(chunk)}")
             self._download_stock_data(chunk, failed_stocks)
 
         if failed_stocks:
@@ -210,18 +202,18 @@ class BaostockDownloader(BaseDownloader):
 
         # 使用进程池进行并发下载，每个进程都会有自己的登录状态
         # 添加prefer="threads"为线程并发，线程间共享内存空间；不加参数默认则是进程并发，不共享内存
-        res = Parallel(n_jobs=self.config.get('download', {}).get('max_workers', 4), prefer="threads")(
-            delayed(_download_single_stock)(_stock) for _stock in tqdm(chunk)
-        )
+        # BaoStock并不支持多线程下载，放弃了，还是乖乖使用单线程顺序下载
+        # res = Parallel(n_jobs=self.config.get('download', {}).get('max_workers', 4), prefer="threads")(
+        #     delayed(_download_single_stock)(_stock) for _stock in tqdm(chunk)
+        # )
 
         # 使用单线程顺序下载
-        # for stock_code in tqdm(chunk):
-        #     result = _download_single_stock(stock_code)
-        #     if result != self.NORMAL_FLAG:
-        #         failed_stocks.append(stock_code)
+        for stock_code in tqdm(chunk):
+            result = _download_single_stock(stock_code)
+            if result != self.NORMAL_FLAG:
+                failed_stocks.append(stock_code)
 
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
-        logger.info(f"当前批次股票数量: {len(chunk)}")
         return failed_stocks
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
