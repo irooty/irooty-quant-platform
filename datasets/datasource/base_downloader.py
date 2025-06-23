@@ -117,7 +117,7 @@ class BaseDownloader(ABC):
             merge_fn: 合并去重函数，参数为DataFrame列表，返回合并后的DataFrame
             split_ranges_fn: 可选，将缺失集合分为连续区间的函数，返回区间列表
         Returns:
-            DataFrame: 合并后的新数据
+            DataFrame: 合并后的新数据（如果没有缺失则返回本地数据，调用方应判断数据是否有变化再保存）
         """
         local_set = get_local_set_fn(df_local) if df_local is not None else set()
         missing = sorted(list(target_set - local_set))

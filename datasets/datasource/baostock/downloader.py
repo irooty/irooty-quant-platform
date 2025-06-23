@@ -232,8 +232,6 @@ class BaostockDownloader(BaseDownloader):
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
         """下载单个股票的日线数据，按交易日增量补齐"""
-        import pandas as pd
-        from datetime import datetime
 
         start_date = self.start_date or self.config.get('start_date', '2010-01-01')
         end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
@@ -256,11 +254,13 @@ class BaostockDownloader(BaseDownloader):
 
         # 3. 定义辅助函数
         def get_local_dates(df):
+            """ 提取已有数据中的交易日集合（格式化为 YYYY-MM-DD）"""
             if df is None or df.empty or 'date' not in df.columns:
                 return set()
             return set(pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d'))
 
         def split_into_ranges(dates):
+            """ 将缺失交易日划分为连续区间段（例如：[(2024-01-01, 2024-01-03), (2024-01-05, 2024-01-05)]） """
             if not dates:
                 return []
             from datetime import datetime, timedelta
@@ -279,6 +279,7 @@ class BaostockDownloader(BaseDownloader):
             return ranges
 
         def download_missing(rng):
+            """从 Baostock 下载指定区间的数据"""
             rs = self._make_request(
                 self.bs.query_history_k_data_plus,
                 code=stock_code,
@@ -291,6 +292,7 @@ class BaostockDownloader(BaseDownloader):
             return self._process_result(rs)
 
         def merge_dfs(dfs):
+            """合并多个 DataFrame，按日期去重、排序"""
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
             if 'date' in df_new.columns:
                 df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
@@ -309,8 +311,8 @@ class BaostockDownloader(BaseDownloader):
             split_ranges_fn=split_into_ranges
         )
 
-        # 5. 保存
-        if df_new is not None and not df_new.empty:
+        # 5. 只有数据有变化时才保存
+        if not df_new.empty and not df_new.equals(df_local):
             os.makedirs(save_path, exist_ok=True)
             metadata = {
                 'stock_code': stock_code,
@@ -327,8 +329,6 @@ class BaostockDownloader(BaseDownloader):
 
     def download_dividend_data(self, stock_code: str) -> pd.DataFrame:
         """下载分红数据，按年份增量补齐"""
-        import pandas as pd
-        from datetime import datetime
 
         start_date = self.start_date or self.config.get('start_date', '2010-01-01')
         end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
@@ -393,8 +393,8 @@ class BaostockDownloader(BaseDownloader):
             merge_dfs
         )
 
-        # 5. 保存
-        if df_new is not None and not df_new.empty:
+        # 5. 只有数据有变化时才保存
+        if not df_new.empty and not df_new.equals(df_local):
             os.makedirs(save_path, exist_ok=True)
             metadata = {
                 'stock_code': stock_code,
