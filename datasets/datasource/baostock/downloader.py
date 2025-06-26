@@ -43,7 +43,7 @@ class BaostockDownloader(BaseDownloader):
         """
         self.bs = bs
         self.last_request_time = 0  # 初始化最后请求时间
-        self.min_request_interval = 0.5  # 最小请求间隔（秒）
+        self.min_request_interval = 0.1  # 最小请求间隔（秒）
         self.NORMAL_FLAG = "NORMAL"  # 标记正常下载的股票
         # self.lock = threading.Lock() # 初始化一把锁，用于调用Baostock API，因为它不支持多线程
         super().__init__(
@@ -237,22 +237,19 @@ class BaostockDownloader(BaseDownloader):
         """
         批量下载股票数据，分两步：
         1. 只依赖download_status.json元数据判断哪些股票需要下载。
-           - 如果元数据文件不存在或内容为空，则全部股票都需要下载。
-           - 否则，用区间判断决定是否需要增量下载。
         2. 下载阶段进度条总数为所有股票数，只有在待下载列表里的股票才实际下载。
         """
         chunk_size = self.config.get('download', {}).get('chunk_size', 1000)
         total_stocks = len(self.stock_codes)
-        logger.info(f'开始检查 {total_stocks} 支股票的数据是否最新...')
+        logger.info(f'开始处理 {total_stocks} 支股票的数据...')
 
         status = self.load_status()
         use_status = bool(status)
         to_download = set()
-        skipped = 0
 
         if use_status:
-            logger.info("检测到download_status.json，用区间判断决定是否需要增量下载。")
-            for stock_code in tqdm(self.stock_codes, desc="检查最新进度（区间判断）"):
+            # 检查阶段进度条
+            for stock_code in tqdm(self.stock_codes, desc="检查进度", total=total_stocks):
                 need_download = False
                 if not self.is_daily_data_up_to_date(stock_code):
                     need_download = True
@@ -260,24 +257,17 @@ class BaostockDownloader(BaseDownloader):
                     need_download = True
                 if need_download:
                     to_download.add(stock_code)
-                else:
-                    skipped += 1
         else:
-            logger.info("未检测到download_status.json或内容为空，全部股票都需要下载。")
             to_download = set(self.stock_codes)
-            skipped = 0
 
-        logger.info(f"无需下载（已最新）的股票数量: {skipped}")
-        logger.info(f"需要下载的股票数量: {len(to_download)}")
-
-        # 下载阶段
         if not to_download:
             logger.info("所有股票数据均为最新，无需下载。")
             return
         failed_stocks = []
-        logger.info(f'开始下载，进度条总数为全部股票数，实际下载 {len(to_download)} 支股票')
-        for i in range(0, total_stocks, chunk_size):
+        num_batches = (total_stocks + chunk_size - 1) // chunk_size
+        for batch_idx, i in enumerate(range(0, total_stocks, chunk_size), 1):
             chunk = self.stock_codes[i:i + chunk_size]
+            logger.info(f"正在处理第{batch_idx}批/共{num_batches}批，每批{len(chunk)}只股票")
             self._download_stock_data(chunk, failed_stocks, to_download)
         if failed_stocks:
             logger.info(f"下载失败的股票列表: {failed_stocks}")
@@ -291,22 +281,23 @@ class BaostockDownloader(BaseDownloader):
         """
         skipped = 0
         for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
-            if stock_code not in to_download_set:
+            if stock_code in to_download_set:
+                # 下载日线数据
+                daily_ok = self.download_daily_data(stock_code)
+                if daily_ok is not None:
+                    self.update_status(stock_code, 'daily', {
+                        'status': 'done',
+                        'start_date': self.start_date,
+                        'end_date': self.end_date,
+                        'last_update': datetime.now().strftime('%Y-%m-%d'),
+                    })
+                # 下载分红数据（元数据更新由download_dividend_data自己处理）
+                dividend_ok = self.download_dividend_data(stock_code)
+                if daily_ok is None or dividend_ok is None:
+                    failed_stocks.append(stock_code)
+            else:
                 skipped += 1
-                continue
-            # 下载日线数据
-            daily_ok = self.download_daily_data(stock_code)
-            if daily_ok is not None:
-                self.update_status(stock_code, 'daily', {
-                    'status': 'done',
-                    'start_date': self.start_date,
-                    'end_date': self.end_date,
-                    'last_update': datetime.now().strftime('%Y-%m-%d'),
-                })
-            # 下载分红数据（元数据更新由download_dividend_data自己处理）
-            dividend_ok = self.download_dividend_data(stock_code)
-            if daily_ok is None or dividend_ok is None:
-                failed_stocks.append(stock_code)
+                time.sleep(0.02)  # 微小延迟，让进度条有流动感
         logger.info(f"本批次跳过已最新股票数量: {skipped}")
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         return failed_stocks
