@@ -62,6 +62,15 @@ class BaostockDownloader(BaseDownloader):
             stock_df = self.download_stock_list()
             self.stock_codes = stock_df['code'].tolist()
 
+        # 优化：统一计算start_date、end_date
+        self.start_date = self.start_date or self.config.get('start_date', '2010-01-01')
+        self.end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
+
+        # 优化：一次性获取所有交易日
+        self.trade_dates = self.get_trade_dates(self.start_date, self.end_date)
+        # 优化：一次性计算所有年份集合
+        self.all_years = set(str(y) for y in range(int(self.start_date[:4]), int(self.end_date[:4]) + 1))
+
     def login(self) -> None:
         """登录系统，支持自动重试
         使用指数退避算法进行重试，避免频繁重试对服务器造成压力
@@ -162,57 +171,143 @@ class BaostockDownloader(BaseDownloader):
 
         return stock_df
 
+    def _status_file(self):
+        """返回元数据文件路径"""
+        return os.path.join(self.config.get('data_path', '../data/raw/baostock'), 'download_status.json')
+
+    def load_status(self):
+        """加载下载元数据"""
+        status_file = self._status_file()
+        if os.path.exists(status_file):
+            with open(status_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+
+    def save_status(self, status):
+        """保存下载元数据"""
+        status_file = self._status_file()
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump(status, f, ensure_ascii=False, indent=2)
+
+    def update_status(self, stock_code, data_type, status_info):
+        """更新某只股票某类数据的下载状态"""
+        status = self.load_status()
+        if stock_code not in status:
+            status[stock_code] = {}
+        status[stock_code][data_type] = status_info
+        self.save_status(status)
+
+    def is_data_downloaded(self, stock_code, data_type):
+        """判断某只股票某类数据是否已下载（done）"""
+        status = self.load_status()
+        return (
+            stock_code in status and
+            data_type in status[stock_code] and
+            status[stock_code][data_type].get('status') == 'done'
+        )
+
+    def is_daily_data_up_to_date(self, stock_code, target_start=None, target_end=None):
+        """判断某只股票的日线数据是否覆盖目标区间"""
+        if target_start is None:
+            target_start = self.start_date
+        if target_end is None:
+            target_end = self.end_date
+        status = self.load_status()
+        info = status.get(stock_code, {}).get('daily', {})
+        if info.get('status') != 'done':
+            return False
+        # 判断区间是否覆盖
+        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
+
+    def is_dividend_data_up_to_date(self, stock_code, target_years=None):
+        """判断某只股票的分红数据是否覆盖目标年份"""
+        if target_years is None:
+            target_years = self.all_years
+        status = self.load_status()
+        info = status.get(stock_code, {}).get('dividend', {})
+        if info.get('status') != 'done':
+            return False
+        # 如果确实无分红数据，认为已是最新
+        if info.get('has_dividend') == False:
+            return True
+        # 有分红数据时，检查年份覆盖
+        return set(info.get('years', [])) >= set(target_years)
+
     def batch_download(self) -> None:
-        """批量下载股票数据
-                将股票列表分块处理，每块并发下载，避免创建过多任务
         """
-        # 将股票列表分成多个批次
+        批量下载股票数据，分两步：
+        1. 只依赖download_status.json元数据判断哪些股票需要下载。
+           - 如果元数据文件不存在或内容为空，则全部股票都需要下载。
+           - 否则，用区间判断决定是否需要增量下载。
+        2. 下载阶段进度条总数为所有股票数，只有在待下载列表里的股票才实际下载。
+        """
         chunk_size = self.config.get('download', {}).get('chunk_size', 1000)
-        stock_chunks = [self.stock_codes[i:i + chunk_size] for i in range(0, len(self.stock_codes), chunk_size)]
         total_stocks = len(self.stock_codes)
-        logger.info(f'开始下载 {total_stocks} 支股票的日线数据，分 {len(stock_chunks)} 批处理')
+        logger.info(f'开始检查 {total_stocks} 支股票的数据是否最新...')
 
-        failed_stocks = []  # 记录下载失败的股票代码
+        status = self.load_status()
+        use_status = bool(status)
+        to_download = set()
+        skipped = 0
 
-        for chunk_idx, chunk in enumerate(stock_chunks, 1):
-            logger.info(f"批次 {chunk_idx}/{len(stock_chunks)}")
-            logger.info(f"当前批次股票数量: {len(chunk)}")
-            self._download_stock_data(chunk, failed_stocks)
+        if use_status:
+            logger.info("检测到download_status.json，用区间判断决定是否需要增量下载。")
+            for stock_code in tqdm(self.stock_codes, desc="检查最新进度（区间判断）"):
+                need_download = False
+                if not self.is_daily_data_up_to_date(stock_code):
+                    need_download = True
+                if not self.is_dividend_data_up_to_date(stock_code):
+                    need_download = True
+                if need_download:
+                    to_download.add(stock_code)
+                else:
+                    skipped += 1
+        else:
+            logger.info("未检测到download_status.json或内容为空，全部股票都需要下载。")
+            to_download = set(self.stock_codes)
+            skipped = 0
 
+        logger.info(f"无需下载（已最新）的股票数量: {skipped}")
+        logger.info(f"需要下载的股票数量: {len(to_download)}")
+
+        # 下载阶段
+        if not to_download:
+            logger.info("所有股票数据均为最新，无需下载。")
+            return
+        failed_stocks = []
+        logger.info(f'开始下载，进度条总数为全部股票数，实际下载 {len(to_download)} 支股票')
+        for i in range(0, total_stocks, chunk_size):
+            chunk = self.stock_codes[i:i + chunk_size]
+            self._download_stock_data(chunk, failed_stocks, to_download)
         if failed_stocks:
             logger.info(f"下载失败的股票列表: {failed_stocks}")
         else:
             logger.info("所有股票下载成功")
 
-    def _download_stock_data(self, chunk, failed_stocks):
+    def _download_stock_data(self, chunk, failed_stocks, to_download_set):
         """
-        按批下载股票数据
-        :param chunk: 股票列表
-        :param failed_stocks: 失败列表
-        :return:
+        按批下载股票数据，进度条总数为本批次所有股票数，只有在待下载列表里的才实际下载。
+        下载完成后及时更新元数据的区间信息。
         """
-        def _download_single_stock(stock_code):
-            try:
-                self.download_daily_data(stock_code)
-                self.download_dividend_data(stock_code)
-                return self.NORMAL_FLAG
-            except Exception as e:
-                logger.error(f"下载 {stock_code} 失败: {e}")
-                return stock_code
-
-        # 使用进程池进行并发下载，每个进程都会有自己的登录状态
-        # 添加prefer="threads"为线程并发，线程间共享内存空间；不加参数默认则是进程并发，不共享内存
-        # BaoStock并不支持多线程下载，放弃了，还是乖乖使用单线程顺序下载
-        # res = Parallel(n_jobs=self.config.get('download', {}).get('max_workers', 4), prefer="threads")(
-        #     delayed(_download_single_stock)(_stock) for _stock in tqdm(chunk)
-        # )
-
-        # 使用单线程顺序下载
-        for stock_code in tqdm(chunk):
-            result = _download_single_stock(stock_code)
-            if result != self.NORMAL_FLAG:
+        skipped = 0
+        for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
+            if stock_code not in to_download_set:
+                skipped += 1
+                continue
+            # 下载日线数据
+            daily_ok = self.download_daily_data(stock_code)
+            if daily_ok is not None:
+                self.update_status(stock_code, 'daily', {
+                    'status': 'done',
+                    'start_date': self.start_date,
+                    'end_date': self.end_date,
+                    'last_update': datetime.now().strftime('%Y-%m-%d'),
+                })
+            # 下载分红数据（元数据更新由download_dividend_data自己处理）
+            dividend_ok = self.download_dividend_data(stock_code)
+            if daily_ok is None or dividend_ok is None:
                 failed_stocks.append(stock_code)
-
+        logger.info(f"本批次跳过已最新股票数量: {skipped}")
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         return failed_stocks
 
@@ -233,16 +328,14 @@ class BaostockDownloader(BaseDownloader):
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
         """下载单个股票的日线数据，按交易日增量补齐"""
 
-        start_date = self.start_date or self.config.get('start_date', '2010-01-01')
-        end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
         fields = self.config.get('fields', {}).get('daily')
 
         save_path = os.path.join(self.config.get('data_path', '../data/raw/baostock'), 'daily', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_daily.csv')
         metadata_path = f"{file_path}.meta"
 
-        # 1. 获取目标区间的所有交易日
-        trade_dates = self.get_trade_dates(start_date, end_date)
+        # 1. 获取目标区间的所有交易日（用缓存）
+        trade_dates = self.trade_dates
 
         # 2. 读取本地数据
         if os.path.exists(file_path):
@@ -311,13 +404,13 @@ class BaostockDownloader(BaseDownloader):
             split_ranges_fn=split_into_ranges
         )
 
-        # 5. 只有数据有变化时才保存
-        if not df_new.empty and not df_new.equals(df_local):
+        # 5. 保存数据并更新元数据
+        if not df_new.empty:
             os.makedirs(save_path, exist_ok=True)
             metadata = {
                 'stock_code': stock_code,
-                'start_date': start_date,
-                'end_date': end_date,
+                'start_date': self.start_date,
+                'end_date': self.end_date,
                 'download_date': datetime.now().isoformat(),
                 'record_count': len(df_new),
                 'fields': list(df_new.columns)
@@ -330,18 +423,14 @@ class BaostockDownloader(BaseDownloader):
     def download_dividend_data(self, stock_code: str) -> pd.DataFrame:
         """下载分红数据，按年份增量补齐"""
 
-        start_date = self.start_date or self.config.get('start_date', '2010-01-01')
-        end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
         fields = self.config.get('fields', {}).get('dividend')
 
         save_path = os.path.join(self.config.get('data_path', '../data/raw/baostock'), 'dividend', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_dividend.csv')
         metadata_path = f"{file_path}.meta"
 
-        # 1. 计算目标年份集合
-        start_year = int(start_date[:4])
-        end_year = int(end_date[:4])
-        all_years = set(str(y) for y in range(start_year, end_year + 1))
+        # 1. 计算目标年份集合（用缓存）
+        all_years = self.all_years
 
         # 2. 读取本地数据
         if os.path.exists(file_path):
@@ -376,7 +465,6 @@ class BaostockDownloader(BaseDownloader):
 
         def merge_dfs(dfs):
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
-            # 尽量按year、dividend_year、report_date等去重
             if 'dividend_year' in df_new.columns:
                 df_new['year'] = df_new['dividend_year']
             elif 'year' not in df_new.columns and 'report_date' in df_new.columns:
@@ -393,18 +481,32 @@ class BaostockDownloader(BaseDownloader):
             merge_dfs
         )
 
-        # 5. 只有数据有变化时才保存
-        if not df_new.empty and not df_new.equals(df_local):
+        # 5. 保存数据并更新元数据
+        if not df_new.empty:
             os.makedirs(save_path, exist_ok=True)
             metadata = {
                 'stock_code': stock_code,
-                'start_date': start_date,
-                'end_date': end_date,
+                'start_date': self.start_date,
+                'end_date': self.end_date,
                 'download_date': datetime.now().isoformat(),
                 'record_count': len(df_new),
                 'fields': list(df_new.columns)
             }
             self._save_with_metadata(df_new, file_path, metadata)
+            # 有分红数据
+            self.update_status(stock_code, 'dividend', {
+                'status': 'done',
+                'years': list(self.all_years),
+                'has_dividend': True,
+                'last_update': datetime.now().strftime('%Y-%m-%d'),
+            })
             return df_new
         else:
+            # 无分红数据
+            self.update_status(stock_code, 'dividend', {
+                'status': 'done',
+                'years': list(self.all_years),
+                'has_dividend': False,
+                'last_update': datetime.now().strftime('%Y-%m-%d'),
+            })
             return df_local
