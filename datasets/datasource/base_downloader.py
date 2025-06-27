@@ -32,17 +32,18 @@ class BaseDownloader(ABC):
             end_date: 结束日期，格式：YYYY-MM-DD
             convert: 是否转换为Qlib格式，默认为False
             interval: 数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
-            stock_codes: 要下载的股票代码列表，默认为None
+            stock_codes: 要下载的股票代码列表，支持list、逗号分隔字符串、或文件路径
         """
         self.provider = provider
         self.start_date = start_date
         self.end_date = end_date
         self.convert = convert
         self.interval = interval
-        self.stock_codes = stock_codes
+        self.stock_codes = self._parse_stock_codes(stock_codes)
         self.config = self._load_config(config_path, provider)
 
-    def _load_config(self, config_path: Optional[str], provider: str) -> Dict[str, Any]:
+    @staticmethod
+    def _load_config(config_path: Optional[str], provider: str) -> Dict[str, Any]:
         """加载配置文件，合并通用配置和数据源专属配置
         
         配置合并规则：
@@ -82,7 +83,33 @@ class BaseDownloader(ABC):
             config['data_path'] = os.path.join(common_config.get('data_path', 'data/raw'), provider)
             
         return config
-    
+
+    @staticmethod
+    def _parse_stock_codes(stock_codes):
+        """
+        解析股票代码参数，支持三种输入：
+        - list: 直接返回
+        - str: 可能是逗号分隔字符串，也可能是文件路径
+        - None: 返回 None
+        """
+        if stock_codes is None:
+            return None
+        if isinstance(stock_codes, list):
+            return stock_codes
+        if isinstance(stock_codes, str):
+            if os.path.isfile(stock_codes):
+                codes = []
+                with open(stock_codes, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        # 跳过空行和注释行
+                        if not line or line.startswith('#'):
+                            continue
+                        codes.extend([c.strip() for c in line.split(',') if c.strip()])
+                return codes
+            else:
+                return [c.strip() for c in stock_codes.split(',') if c.strip()]
+        raise ValueError('stock_codes参数类型不支持，应为list、逗号分隔字符串或股票代码文件路径')
 
     @abstractmethod
     def batch_download(self) -> None:

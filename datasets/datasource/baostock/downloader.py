@@ -456,11 +456,17 @@ class BaostockDownloader(BaseDownloader):
 
         def merge_dfs(dfs):
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
+            # 确保year列存在
             if 'dividend_year' in df_new.columns:
                 df_new['year'] = df_new['dividend_year']
             elif 'year' not in df_new.columns and 'report_date' in df_new.columns:
                 df_new['year'] = df_new['report_date'].astype(str).str[:4]
-            df_new = df_new.drop_duplicates().sort_values('year')
+            
+            # 安全排序：如果year列存在则按year排序，否则按索引排序
+            if 'year' in df_new.columns:
+                df_new = df_new.drop_duplicates().sort_values('year')
+            else:
+                df_new = df_new.drop_duplicates().sort_index()
             return df_new
 
         # 4. 增量补齐

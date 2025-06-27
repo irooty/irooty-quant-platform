@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--start-date', type=str, help='开始日期 (YYYY-MM-DD)')
     parser.add_argument('--end-date', type=str, help='结束日期 (YYYY-MM-DD)')
     parser.add_argument('--convert', action='store_true', help='是否转换为Qlib格式')
-    parser.add_argument('--stock_codes', type=str, help='要下载的股票列表，逗号分隔，如 sh.600000,sz.000001')
+    parser.add_argument('--stock-codes', type=str, help='要下载的股票列表，支持逗号分隔字符串（如 sh.600000,sz.000001）或文件路径（如 codes.txt，每行一个或逗号分隔）')
     parser.add_argument('--interval', type=str, default='1d', help='数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据')
     return parser.parse_args()
 
@@ -52,11 +52,6 @@ def main():
     provider_config = get_market_provider(config, args.provider)
     
     try:
-        # 解析股票列表
-        stock_codes = None
-        if args.stock_codes:
-            stock_codes = [code.strip() for code in args.stock_codes.split(',') if code.strip()]
-        
         # 初始化下载器
         downloader_class = import_class(
             provider_config['downloader']['module'],
@@ -69,7 +64,7 @@ def main():
             end_date=args.end_date,
             convert=args.convert,
             interval=args.interval,
-            stock_codes=stock_codes
+            stock_codes=args.stock_codes
         )
         
         # 下载数据

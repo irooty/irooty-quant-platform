@@ -12,7 +12,7 @@ def main(
     start_date: str = None,  # 开始日期，格式：YYYY-MM-DD
     end_date: str = None,    # 结束日期，格式：YYYY-MM-DD
     convert: bool = False,   # 是否转换为Qlib格式
-    stock_codes: str = None,  # 要下载的股票列表，逗号分隔字符串
+    stock_codes: str = None,  # 要下载的股票列表，支持逗号分隔字符串或文件路径（如.txt，每行一个或逗号分隔）
     interval: str = '1d'     # 数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
 ):
     """
@@ -21,10 +21,11 @@ def main(
     参数说明:
       --provider     金融数据提供方（如 baostock）【必填】
       --config       配置文件路径，默认 market_provider.yaml
-      --start_date   开始日期，格式：YYYY-MM-DD
-      --end_date     结束日期，格式：YYYY-MM-DD
+      --start-date   开始日期，格式：YYYY-MM-DD
+      --end-date     结束日期，格式：YYYY-MM-DD
       --convert      是否转换为Qlib格式，布尔值
-      --stock_codes  要下载的股票列表，逗号分隔，如 sh.600000,sz.000001
+      --stock-codes  要下载的股票列表，支持逗号分隔字符串（如 sh.600000,sz.000001），
+                     或文件路径（如 codes.txt，每行一个或逗号分隔）
       --interval     数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
     """
     # 添加项目根目录到Python路径
