@@ -218,6 +218,47 @@ irooty-quant-platform/
 
 ---
 
+### 8. 自动交易脚本入口
+
+统一的自动化交易入口脚本位于 `scripts/run_trade.py`，支持通过配置文件动态加载交易执行器和策略插件，实现自动下单。可结合 `schedule` 实现每日定时交易。
+
+#### 目录结构示例
+
+```
+irooty-quant-platform/
+├── trading/
+│   ├── executor/
+│   ├── trader_runner.py
+├── strategies/
+├── config/
+│   └── trading.yaml
+├── scripts/
+│   ├── run_trade.py
+│   └── daily_run.py
+```
+
+#### 自动交易脚本用法
+
+```bash
+python scripts/run_trade.py
+```
+
+#### 定时自动交易脚本（每日09:35自动运行）
+
+#### 启动定时任务
+
+```bash
+python scripts/daily_run.py
+```
+
+- 运行时间可灵活调整，如 `"09:31"`、`"14:56"`。
+- 支持后台运行：`nohup python scripts/daily_run.py &`
+- 需在 `requirements.txt` 中包含 `schedule` 依赖。
+
+如需多时点、多策略调度，只需复制多行 `schedule.every().day.at("HH:MM").do(...)`。
+
+---
+
 ### 📌 小贴士
 
 - 所有路径和配置参数集中于 `config/` 目录下；

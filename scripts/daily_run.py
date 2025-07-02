@@ -1,8 +1,18 @@
 # 每日运行
+# scripts/daily_run.py
+# 自动定时任务脚本：每天定时运行自动交易入口（可用于定时调度）
 import schedule
 import os
+import time
 
-schedule.every().day.at("09:35").do(lambda: os.system("python scripts/run_trade.py"))
+def run_trade():
+    # 可根据实际路径调整（支持日志重定向等）
+    os.system("python scripts/run_trade.py")
+
+# 设置每天早上09:35自动执行 run_trade
+schedule.every().day.at("09:35").do(run_trade)
+
+print("定时任务已启动，将在每天09:35自动运行交易脚本。")
 
 while True:
     schedule.run_pending()
