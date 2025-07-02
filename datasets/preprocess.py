@@ -39,7 +39,8 @@ class DataPreprocessor:
         
         return df
     
-    def _handle_missing_values(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
         """处理缺失值
         
         Args:
@@ -59,7 +60,8 @@ class DataPreprocessor:
             
         return df
     
-    def _handle_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _handle_outliers(df: pd.DataFrame) -> pd.DataFrame:
         """处理异常值
         
         Args:
@@ -83,7 +85,41 @@ class DataPreprocessor:
             df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
             
         return df
-    
+
+    @staticmethod
+    def standardize_columns(df: pd.DataFrame, column_map: dict, required_columns: list) -> pd.DataFrame:
+        """
+        字段标准化：重命名、补齐、排序
+        Args:
+            df: 输入数据
+            column_map: 字段重命名映射，如 {'openPrice': 'open', 'closePrice': 'close'}
+            required_columns: Qlib要求的字段顺序
+        Returns:
+            pd.DataFrame: 标准化后的数据
+        """
+        df = df.rename(columns=column_map)
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = np.nan
+        df = df[required_columns]
+        return df
+
+    @staticmethod
+    def align_and_sort(df: pd.DataFrame, date_col: str = 'date', code_col: str = 'code') -> pd.DataFrame:
+        """
+        数据对齐和排序
+        Args:
+            df: 输入数据
+            date_col: 日期字段名
+            code_col: 股票代码字段名
+        Returns:
+            pd.DataFrame: 对齐、排序后的数据
+        """
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.sort_values([code_col, date_col]).reset_index(drop=True)
+        df = df.drop_duplicates(subset=[code_col, date_col])
+        return df
+
     def feature_engineering(self, df: pd.DataFrame) -> pd.DataFrame:
         """特征工程
         
@@ -101,7 +137,8 @@ class DataPreprocessor:
         
         return df
     
-    def _calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """计算技术指标
         
         Args:
@@ -130,7 +167,8 @@ class DataPreprocessor:
         
         return df
     
-    def _standardize_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _standardize_features(df: pd.DataFrame) -> pd.DataFrame:
         """特征标准化
         
         Args:

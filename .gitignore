@@ -40,7 +40,8 @@ logs/
 *.log
 
 # 数据和输出
-data
+data/
+!data/stock_list/
 datasets/*.csv
 datasets/*.h5
 datasets/*.npz
