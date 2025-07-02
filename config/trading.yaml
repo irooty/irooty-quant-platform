@@ -1,0 +1,11 @@
+# 交易接口实现类
+executor:
+  module: trading.executor.mock_executor
+  class: MockExecutor
+# 策略方法
+strategy:
+  module: strategies.simple_strategy
+  function: should_buy
+# 自选股票列表
+watchlist_path: data/watchlist.csv
+volume: 100

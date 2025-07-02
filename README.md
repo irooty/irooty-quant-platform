@@ -34,8 +34,17 @@ quant-platform/
 ├── models/                    # ML/DL 模型模块
 │   ├── model_base.py          # 模型基类
 │   ├── xgboost_alpha.py       # XGBoost 股票评分
+│   ├── trading.yaml           # 自动交易参数（如股数、策略类型）
 │   └── lstm_timing.py         # LSTM 市场择时
 │
+├── trading/                   # 自动实盘交易模块
+│   ├── executor/                   # 交易执行器目录，不同交易接口实现不同执行器
+│   │   ├── base_executor.py        # 抽象基类接口
+│   │   ├── qmt_executor.py         # 迅投实现
+│   │   └── mock_executor.py        # 示例：本地打印模拟下单
+│   ├── simple_strategy.py          # 示例策略（未来也可以抽象）
+│   └── trader_runner.py            # 统一策略执行调度（加载执行器 + 策略）
+│ 
 ├── config/                    # 配置文件
 │   ├── paths.yaml             # 路径配置
 │   ├── strategy.yaml          # 策略参数
@@ -54,7 +63,8 @@ quant-platform/
 ├── scripts/                   # 常用脚本入口
 │   ├── fetch_data.py          # 数据更新脚本
 │   ├── daily_run.py           # 每日任务调度
-│   └── deploy_bot.py          # 结果推送脚本
+│   ├── deploy_bot.py          # 结果推送脚本
+│   └── run_trade.py           # 统一交易入口脚本（可以定时调度）
 │
 ├── requirements.txt           # Python 依赖列表
 ├── main.py                    # 项目主入口
