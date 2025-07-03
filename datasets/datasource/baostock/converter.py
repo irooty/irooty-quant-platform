@@ -6,10 +6,10 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from loguru import logger
-import yaml
 from datetime import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
+from utils.path_utils import load_config, get_config_path
 
 class BaostockToQlibConverter:
     """将Baostock数据转换为Qlib格式"""
@@ -25,10 +25,11 @@ class BaostockToQlibConverter:
     def _load_config(self, config_path):
         """加载配置文件"""
         if config_path is None:
-            config_path = Path(__file__).parent.parent.parent / 'config' / 'market_provider.yaml'
-        
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
+            return load_config("market_provider.yaml")
+        else:
+            # 如果提供了具体路径，使用统一的load_config
+            config_name = config_path.split('/')[-1] if '/' in config_path else config_path
+            return load_config(config_name)
     
     def _load_stock_list(self):
         """加载股票列表"""

@@ -23,6 +23,20 @@ def get_config_path(config_name):
     project_root = get_project_root()
     return os.path.join(project_root, "config", config_name)
 
+def load_config(config_name):
+    """
+    统一加载配置文件。
+    
+    Args:
+        config_name: 配置文件名，如 'trading.yaml', 'market_provider.yaml'
+    
+    Returns:
+        dict: 配置内容
+    """
+    config_path = get_config_path(config_name)
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
 def get_qlib_data_dir(config_path="config/paths.yaml"):
     """
     读取 Qlib 数据目录配置，并将相对路径转换为绝对路径。
@@ -44,3 +58,6 @@ def get_qlib_data_dir(config_path="config/paths.yaml"):
 if __name__ == "__main__":
     print(get_qlib_data_dir())
     print(get_config_path("market_provider.yaml"))
+    # 测试加载配置
+    trading_config = load_config("trading.yaml")
+    print("Trading config loaded:", trading_config)

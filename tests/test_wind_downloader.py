@@ -1,15 +1,13 @@
 import unittest
 from pathlib import Path
-import yaml
+from utils.path_utils import load_config
 from datasets.wind import WindDownloader
 
 class TestWindDownloader(unittest.TestCase):
     def setUp(self):
         """测试前的准备工作"""
-        # 读取配置文件
-        config_path = Path("config/wind_config.yaml")
-        with open(config_path, "r", encoding="utf-8") as f:
-            self.config = yaml.safe_load(f)
+        # 使用统一配置加载方法
+        self.config = load_config("wind_config.yaml")
         
         # 创建下载器实例
         self.downloader = WindDownloader(self.config)

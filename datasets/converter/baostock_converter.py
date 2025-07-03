@@ -6,8 +6,8 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 from loguru import logger
-import yaml
 from typing import Optional, Dict, Any, List
+from utils.path_utils import load_config
 from .base_converter import BaseConverter
 
 class BaostockConverter(BaseConverter):
@@ -18,10 +18,14 @@ class BaostockConverter(BaseConverter):
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """加载配置文件"""
         if config_path is None:
-            config_path = Path(__file__).parent.parent / 'config' / 'market_provider.yaml'
-        
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
+            return load_config("market_provider.yaml")
+        else:
+            # 如果提供了具体路径，使用path_utils的方法
+            from utils.path_utils import get_config_path
+            config_file = get_config_path(config_path)
+            with open(config_file, 'r', encoding='utf-8') as f:
+                import yaml
+                return yaml.safe_load(f)
     
     def _get_stock_list(self) -> List[str]:
         """获取股票列表"""

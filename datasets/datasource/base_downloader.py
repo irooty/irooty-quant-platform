@@ -4,8 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Union
 import os
-import yaml
-from utils.path_utils import get_config_path
+from utils.path_utils import get_config_path, load_config
 
 class BaseDownloader(ABC):
     """数据下载器基类
@@ -59,14 +58,14 @@ class BaseDownloader(ABC):
             Dict[str, Any]: 合并后的配置
         """
         if config_path is None:
-            config_path = get_config_path('market_provider.yaml')
-
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"配置文件不存在: {config_path}")
-
-        # 读取配置文件
-        with open(config_path, 'r', encoding='utf-8') as f:
-            full_config = yaml.safe_load(f)
+            # 使用统一配置加载方法
+            full_config = load_config('market_provider.yaml')
+        else:
+            # 如果提供了具体路径，使用path_utils的方法
+            config_file = get_config_path(config_path)
+            if not os.path.exists(config_file):
+                raise FileNotFoundError(f"配置文件不存在: {config_file}")
+            full_config = load_config(config_path)
             
         # 1. 获取通用配置
         common_config = full_config.get('common', {})
