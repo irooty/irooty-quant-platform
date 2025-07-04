@@ -1,0 +1,4 @@
+# QMT dependency for QMTExecutor
+# pip install xtquant -i https://pypi.tuna.tsinghua.edu.cn/simple
+# pip install -r trading/executor/requirements.txt
+xtquant

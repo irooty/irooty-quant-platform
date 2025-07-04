@@ -42,10 +42,12 @@ def run():
 
         # 4. 读取自选股票列表
         df = pd.read_csv(config["watchlist_path"])
-        volume = config.get("volume", 100)
+        default_volume = config.get("volume", 100)
 
         # 5. 遍历股票，应用策略，满足则下单
-        for stock_code in df["stock_code"]:
+        for idx, row in df.iterrows():
+            stock_code = row["stock_code"]
+            volume = row["volume"] if "volume" in row and not pd.isna(row["volume"]) else default_volume
             try:
                 if strategy_func(stock_code, executor.get_data_api()):
                     order_id = executor.buy(stock_code, volume)
