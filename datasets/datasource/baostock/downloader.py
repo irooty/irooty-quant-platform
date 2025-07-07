@@ -15,20 +15,21 @@ from tqdm import tqdm
 from typing import List, Dict, Optional, Any
 from ..base_downloader import BaseDownloader
 
+
 class BaostockDownloader(BaseDownloader):
     """Baostock数据下载器
     实现了异步并发下载、请求控制、数据完整性校验等功能
     """
 
     def __init__(
-        self,
-        config_path: str = None,
-        provider: str = 'baostock',
-        start_date: str = None,
-        end_date: str = None,
-        convert: bool = False,
-        interval: str = '1d',
-        stock_codes: list = None
+            self,
+            config_path: str = None,
+            provider: str = 'baostock',
+            start_date: str = None,
+            end_date: str = None,
+            convert: bool = False,
+            interval: str = '1d',
+            stock_codes: list = None
     ):
         """初始化下载器
 
@@ -42,8 +43,6 @@ class BaostockDownloader(BaseDownloader):
             stock_codes: 要下载的股票代码列表，默认为None
         """
         self.bs = bs
-        self.last_request_time = 0  # 初始化最后请求时间
-        self.min_request_interval = 0.1  # 最小请求间隔（秒）
         self.NORMAL_FLAG = "NORMAL"  # 标记正常下载的股票
         # self.lock = threading.Lock() # 初始化一把锁，用于调用Baostock API，因为它不支持多线程
         super().__init__(
@@ -61,10 +60,6 @@ class BaostockDownloader(BaseDownloader):
         if self.stock_codes is None:
             stock_df = self.download_stock_list()
             self.stock_codes = stock_df['code'].tolist()
-
-        # 优化：统一计算start_date、end_date
-        self.start_date = self.start_date or self.config.get('start_date', '2010-01-01')
-        self.end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
 
         # 优化：一次性获取所有交易日
         self.trade_dates = self.get_trade_dates(self.start_date, self.end_date)
@@ -86,26 +81,8 @@ class BaostockDownloader(BaseDownloader):
         self.bs.logout()
         logger.info('Baostock登出成功')
 
-    def _wait_for_rate_limit(self):
-        """等待请求频率限制
-        确保两次请求之间至少间隔min_request_interval秒
-        避免触发服务器限流
-        """
-        current_time = time.time()
-        time_since_last_request = current_time - self.last_request_time
-        if time_since_last_request < self.min_request_interval:
-            time.sleep(self.min_request_interval - time_since_last_request)
-        self.last_request_time = time.time()
-
-    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-    def _make_request(self, func, *args, **kwargs):
-        """发送请求，支持自动重试和频率限制
-        使用指数退避算法进行重试，避免频繁重试对服务器造成压力
-        """
-        self._wait_for_rate_limit()
-        return func(*args, **kwargs)
-
-    def _process_result(self, rs):
+    @staticmethod
+    def _process_result(rs):
         """处理查询结果"""
         data_list = []
         while (rs.error_code == '0') & rs.next():
@@ -115,35 +92,6 @@ class BaostockDownloader(BaseDownloader):
         else:
             df = pd.DataFrame()
         return df
-    
-    def _calculate_file_hash(self, file_path: str) -> str:
-        """计算文件哈希值用于校验
-        使用MD5算法计算文件哈希，用于验证数据完整性
-        """
-        if not os.path.exists(file_path):
-            return ""
-        with open(file_path, 'rb') as f:
-            return hashlib.md5(f.read()).hexdigest()
-
-    def _save_with_metadata(self, df: pd.DataFrame, file_path: str, metadata: Dict):
-        """保存数据并记录元数据
-        同时保存数据和元数据，元数据包含：
-        - 文件哈希值
-        - 最后更新时间
-        - 记录数
-        - 字段列表
-        用于后续数据验证和增量更新
-        """
-        # 保存数据
-        df.to_csv(file_path, index=False, encoding='utf-8')
-
-        # 保存元数据
-        metadata_path = f"{file_path}.meta"
-        metadata['file_hash'] = self._calculate_file_hash(file_path)
-        metadata['last_update'] = datetime.now().isoformat()
-
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     def download_stock_list(self) -> pd.DataFrame:
         """下载股票池列表
@@ -201,9 +149,9 @@ class BaostockDownloader(BaseDownloader):
         """判断某只股票某类数据是否已下载（done）"""
         status = self.load_status()
         return (
-            stock_code in status and
-            data_type in status[stock_code] and
-            status[stock_code][data_type].get('status') == 'done'
+                stock_code in status and
+                data_type in status[stock_code] and
+                status[stock_code][data_type].get('status') == 'done'
         )
 
     def is_daily_data_up_to_date(self, stock_code, target_start=None, target_end=None):
@@ -304,7 +252,12 @@ class BaostockDownloader(BaseDownloader):
 
     def get_trade_dates(self, start_date: str, end_date: str) -> set:
         """
-        获取指定区间的所有交易日（YYYY-MM-DD字符串集合）
+        获取指定区间的所有交易日（子类需实现具体逻辑）
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+        Returns:
+            set: 交易日集合（字符串格式YYYY-MM-DD）
         """
         rs = self._make_request(
             self.bs.query_trade_dates,
@@ -461,7 +414,7 @@ class BaostockDownloader(BaseDownloader):
                 df_new['year'] = df_new['dividend_year']
             elif 'year' not in df_new.columns and 'report_date' in df_new.columns:
                 df_new['year'] = df_new['report_date'].astype(str).str[:4]
-            
+
             # 安全排序：如果year列存在则按year排序，否则按索引排序
             if 'year' in df_new.columns:
                 df_new = df_new.drop_duplicates().sort_values('year')

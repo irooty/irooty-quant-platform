@@ -1,17 +1,28 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+"""
+BaseDownloader: 通用数据下载器基类
+- 统一参数管理
+- 配置加载
+- 股票池管理
+- 请求频率控制与重试
+- 文件哈希与元数据
+- 状态管理（断点续传）
+- 通用DataFrame保存/加载
+子类只需实现具体数据源的API调用逻辑。
+"""
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Union
 import os
+import json
+import hashlib
+import pandas as pd
+import time
+from datetime import datetime
+import backoff
 from utils.path_utils import get_config_path, load_config
 
 class BaseDownloader(ABC):
-    """数据下载器基类
-    定义了数据下载的标准接口，所有具体的数据源下载器都应该继承这个类
-    并实现其抽象方法
-    """
-    
     def __init__(
         self,
         config_path: str = None,
@@ -22,8 +33,8 @@ class BaseDownloader(ABC):
         interval: str = '1d',
         stock_codes: list = None
     ):
-        """初始化下载器
-        
+        """
+        初始化通用参数，加载配置
         Args:
             config_path: 配置文件路径，默认为None
             provider: 金融数据提供方名称，用于加载对应的配置
@@ -40,6 +51,13 @@ class BaseDownloader(ABC):
         self.interval = interval
         self.stock_codes = self._parse_stock_codes(stock_codes)
         self.config = self._load_config(config_path, provider)
+        # 请求频率控制
+        self.last_request_time = 0  # 初始化最后请求时间
+        self.min_request_interval = self.config.get('download', {}).get('min_request_interval', 0.5)  # 最小请求间隔（秒），可在子类覆盖
+
+        # 优化：统一计算start_date、end_date
+        self.start_date = self.start_date or self.config.get('start_date', '2010-01-01')
+        self.end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
 
     @staticmethod
     def _load_config(config_path: Optional[str], provider: str) -> Dict[str, Any]:
@@ -80,7 +98,6 @@ class BaseDownloader(ABC):
         # 4. 特殊处理data_path
         if not provider_config.get('data_path'):
             config['data_path'] = os.path.join(common_config.get('data_path', 'data/raw'), provider)
-            
         return config
 
     @staticmethod
@@ -110,25 +127,65 @@ class BaseDownloader(ABC):
                 return [c.strip() for c in stock_codes.split(',') if c.strip()]
         raise ValueError('stock_codes参数类型不支持，应为list、逗号分隔字符串或股票代码文件路径')
 
-    @abstractmethod
-    def batch_download(self) -> None:
-        """批量下载股票数据
-        将股票列表分块处理，每块并发下载，避免创建过多任务
+    def _wait_for_rate_limit(self):
         """
-        pass
+        控制请求频率，避免被限流
+        """
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
+        if time_since_last_request < self.min_request_interval:
+            time.sleep(self.min_request_interval - time_since_last_request)
+        self.last_request_time = time.time()
 
-    def get_trade_dates(self, start_date: str, end_date: str) -> set:
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
+    def _make_request(self, func, *args, **kwargs):
         """
-        获取指定区间的所有交易日（子类需实现具体逻辑）
-        Args:
-            start_date: 开始日期
-            end_date: 结束日期
-        Returns:
-            set: 交易日集合（字符串格式YYYY-MM-DD）
+        封装重试和频率控制的请求调用
         """
-        raise NotImplementedError("请在子类中实现 get_trade_dates 方法")
+        self._wait_for_rate_limit()
+        return func(*args, **kwargs)
 
-    def incremental_update(self, df_local, target_set, get_local_set_fn, download_missing_fn, merge_fn, split_ranges_fn=None):
+    # ================= 文件哈希与元数据 =================
+    @staticmethod
+    def _calculate_file_hash(file_path: str) -> str:
+        """
+        计算文件哈希值（MD5），用于数据完整性校验
+        """
+        if not os.path.exists(file_path):
+            return ""
+        with open(file_path, 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()
+
+    def _save_with_metadata(self, df: pd.DataFrame, file_path: str, metadata: Dict):
+        """
+            保存数据文件及其元数据（如哈希、更新时间、字段等）
+        """
+        df.to_csv(file_path, index=False, encoding='utf-8')
+        metadata_path = f"{file_path}.meta"
+        metadata['file_hash'] = self._calculate_file_hash(file_path)
+        metadata['last_update'] = datetime.now().isoformat()
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+    # ================= 通用DataFrame操作 =================
+    @staticmethod
+    def save_dataframe(df, file_path):
+        """
+        保存DataFrame为csv
+        """
+        df.to_csv(file_path, index=False, encoding='utf-8')
+
+    @staticmethod
+    def load_dataframe(file_path):
+        """
+        加载csv为DataFrame
+        """
+        if os.path.exists(file_path):
+            return pd.read_csv(file_path)
+        return pd.DataFrame()
+
+    @staticmethod
+    def incremental_update(df_local, target_set, get_local_set_fn, download_missing_fn, merge_fn, split_ranges_fn=None):
         """
         通用增量补齐逻辑：
         1. 计算本地已有集合
@@ -164,3 +221,9 @@ class BaseDownloader(ABC):
             return df_new
         else:
             return df_local
+
+    # ========== 子类需实现的抽象方法 ==========
+    @abstractmethod
+    def batch_download(self):
+        """批量下载股票数据"""
+        pass

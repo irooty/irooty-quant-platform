@@ -29,7 +29,7 @@ baostock:
       dividend: date,code,dividPreNoticeDate,dividAgmPumDate,dividPlanAnnounceDate,dividPlanDate,dividRegistDate,dividOperateDate,dividPayDate,dividCashPsBeforeTax,dividCashPsAfterTax,dividStocksPs,dividCashStock,dividReserveToStockPs
     stock_list_fields: code,code_name,industry,industry_classification
 
-# Wind配置
+# 万德配置
 wind:
   downloader:
     module: datasets.datasource.wind.downloader
@@ -42,3 +42,17 @@ wind:
     fields:
       daily: trade_date,open,high,low,close,volume,amt,turn,chg_pct,pe_ttm,pb_lf,ps_ttm,pcf_ncf_ttm
       dividend: ann_date,div_proc,div_cash_beftax,div_cash_afttax,div_stock,div_stock_trans,div_stock_ratio,div_stock_trans_ratio,record_date,ex_date,pay_date 
+
+# 迅投配置
+xtquant:
+  downloader:
+    module: datasets.datasource.xtquant.downloader
+    class: XtquantDownloader
+  # 如果有Qlib格式转换器，可加如下内容，否则可省略
+  # converter:
+  #   module: datasets.datasource.xtquant.converter
+  #   class: XtquantConverter
+  config:
+    fields:
+      daily: [open, close, high, low, volume, amount]  # 你需要的字段
+      dividend: [dividend_year, cash_dividend, ...]    # 你需要的分红字段
