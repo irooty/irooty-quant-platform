@@ -4,6 +4,7 @@ from datetime import datetime
 from loguru import logger
 from ..base_downloader import BaseDownloader
 from xtquant import xtdata
+import json
 
 class XtquantDownloader(BaseDownloader):
     """Xtquant新版数据下载器"""
@@ -27,7 +28,6 @@ class XtquantDownloader(BaseDownloader):
             interval=interval,
             stock_codes=stock_codes
         )
-        self.api = xtdata.XtDataApi()
         if self.stock_codes is None:
             stock_df = self.download_stock_list()
             self.stock_codes = stock_df['code'].tolist()
@@ -36,13 +36,13 @@ class XtquantDownloader(BaseDownloader):
 
     def download_stock_list(self) -> pd.DataFrame:
         logger.info('开始下载股票池列表...')
-        stock_list = self.api.get_stock_list('A')
+        stock_list = xtdata.get_stock_list('A')
         stock_df = pd.DataFrame(stock_list, columns=['code'])
         logger.info(f'下载股票列表{len(stock_df)}支')
         if not stock_df.empty:
             save_path = os.path.join(self.config['data_path'], 'stock_list')
             os.makedirs(save_path, exist_ok=True)
-            file_path = os.path.join(save_path, f'stock_list_{datetime.now().strftime('%Y%m%d')}.csv')
+            file_path = os.path.join(save_path, f'stock_list_{datetime.now().strftime("%Y%m%d")}.csv')
             metadata = {
                 'download_date': datetime.now().isoformat(),
                 'record_count': len(stock_df),
@@ -53,8 +53,13 @@ class XtquantDownloader(BaseDownloader):
         return stock_df
 
     def get_trade_dates(self, start_date: str, end_date: str) -> set:
-        sse_dates = set(self.api.get_trading_dates('SSE', start_date, end_date))
-        szse_dates = set(self.api.get_trading_dates('SZSE', start_date, end_date))
+        from datetime import datetime
+        def ms_to_date(ms):
+            return datetime.fromtimestamp(ms / 1000).strftime('%Y-%m-%d')
+        start = start_date.replace('-', '')
+        end = end_date.replace('-', '')
+        sse_dates = set(ms_to_date(ms) for ms in xtdata.get_trading_dates('SH', start_time=start, end_time=end, count=-1))
+        szse_dates = set(ms_to_date(ms) for ms in xtdata.get_trading_dates('SZ', start_time=start, end_time=end, count=-1))
         return sse_dates | szse_dates
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
@@ -94,17 +99,27 @@ class XtquantDownloader(BaseDownloader):
             return ranges
 
         def download_missing(rng):
-            df = self.api.download_history_data2(
+            # 确保传递给xtquant API的日期为YYYYMMDD
+            start_api = rng[0].replace('-', '')
+            end_api = rng[1].replace('-', '')
+            xtdata.download_history_data2(
                 stock_code,
                 period='1d',
-                start_time=rng[0],
-                end_time=rng[1],
-                fields=fields
+                start_time=start_api,
+                end_time=end_api,
+                incrementally=True
             )
+            df = xtdata.get_market_data_ex([], [stock_code], period='1d', start_time=start_api, end_time=end_api, count=-1)
+            if isinstance(df, dict) and stock_code in df:
+                df = df[stock_code]
             if isinstance(df, pd.DataFrame):
                 if 'datetime' in df.columns:
                     df.rename(columns={'datetime': 'date'}, inplace=True)
                 df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+                # 字段筛选：只保留fields中指定的字段（含'date'）
+                if fields is not None:
+                    keep_cols = ['date'] + [f for f in fields.split(',') if f.strip() and f != 'date']
+                    df = df[[col for col in keep_cols if col in df.columns]]
             return df
 
         def merge_dfs(dfs):
@@ -166,9 +181,12 @@ class XtquantDownloader(BaseDownloader):
 
         def download_missing_year(rng):
             year = rng[0]
-            start = f"{year}-01-01"
-            end = f"{year}-12-31"
-            df = self.api.get_dividend(stock_code, start, end)
+            start_api = f"{year}-01-01".replace('-', '')
+            end_api = f"{year}-12-31".replace('-', '')
+            if hasattr(xtdata, 'get_dividend'):
+                df = xtdata.get_dividend(stock_code, start_api, end_api)
+            else:
+                df = pd.DataFrame()
             if isinstance(df, pd.DataFrame):
                 if 'dividend_year' in df.columns:
                     df['year'] = df['dividend_year']

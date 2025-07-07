@@ -222,8 +222,118 @@ class BaseDownloader(ABC):
         else:
             return df_local
 
-    # ========== 子类需实现的抽象方法 ==========
-    @abstractmethod
-    def batch_download(self):
-        """批量下载股票数据"""
-        pass
+    def _status_file(self):
+        return os.path.join(self.config.get('data_path', f'../data/raw/{self.provider}'), 'download_status.json')
+
+    def load_status(self):
+        status_file = self._status_file()
+        if os.path.exists(status_file):
+            with open(status_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+
+    def save_status(self, status):
+        status_file = self._status_file()
+        os.makedirs(os.path.dirname(status_file), exist_ok=True)
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump(status, f, ensure_ascii=False, indent=2)
+
+    def update_status(self, stock_code, data_type, status_info):
+        status = self.load_status()
+        if stock_code not in status:
+            status[stock_code] = {}
+        status[stock_code][data_type] = status_info
+        self.save_status(status)
+
+    def is_data_downloaded(self, stock_code, data_type):
+        status = self.load_status()
+        return (
+            stock_code in status and
+            data_type in status[stock_code] and
+            status[stock_code][data_type].get('status') == 'done'
+        )
+
+    def is_daily_data_up_to_date(self, stock_code, target_start=None, target_end=None):
+        if target_start is None:
+            target_start = self.start_date
+        if target_end is None:
+            target_end = self.end_date
+        status = self.load_status()
+        info = status.get(stock_code, {}).get('daily', {})
+        if info.get('status') != 'done':
+            return False
+        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
+
+    def is_dividend_data_up_to_date(self, stock_code, target_years=None):
+        if target_years is None:
+            target_years = self.all_years
+        status = self.load_status()
+        info = status.get(stock_code, {}).get('dividend', {})
+        if info.get('status') != 'done':
+            return False
+        if info.get('has_dividend') == False:
+            return True
+        return set(info.get('years', [])) >= set(target_years)
+
+    def batch_download(self) -> None:
+        from tqdm import tqdm
+        import time
+        chunk_size = self.config.get('download', {}).get('chunk_size', 1000)
+        total_stocks = len(self.stock_codes)
+        from loguru import logger
+        logger.info(f'开始处理 {total_stocks} 支股票的数据...')
+
+        status = self.load_status()
+        use_status = bool(status)
+        to_download = set()
+
+        if use_status:
+            for stock_code in tqdm(self.stock_codes, desc="检查进度", total=total_stocks):
+                need_download = False
+                if not self.is_daily_data_up_to_date(stock_code):
+                    need_download = True
+                if not self.is_dividend_data_up_to_date(stock_code):
+                    need_download = True
+                if need_download:
+                    to_download.add(stock_code)
+        else:
+            to_download = set(self.stock_codes)
+
+        if not to_download:
+            logger.info("所有股票数据均为最新，无需下载。")
+            return
+        failed_stocks = []
+        num_batches = (total_stocks + chunk_size - 1) // chunk_size
+        for batch_idx, i in enumerate(range(0, total_stocks, chunk_size), 1):
+            chunk = self.stock_codes[i:i + chunk_size]
+            logger.info(f"正在处理第{batch_idx}批/共{num_batches}批，每批{len(chunk)}只股票")
+            self._download_stock_data(chunk, failed_stocks, to_download)
+        if failed_stocks:
+            logger.info(f"下载失败的股票列表: {failed_stocks}")
+        else:
+            logger.info("所有股票下载成功")
+
+    def _download_stock_data(self, chunk, failed_stocks, to_download_set):
+        from tqdm import tqdm
+        import time
+        from loguru import logger
+        skipped = 0
+        for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
+            if stock_code in to_download_set:
+                daily_ok = self.download_daily_data(stock_code)
+                if daily_ok is not None:
+                    self.update_status(stock_code, 'daily', {
+                        'status': 'done',
+                        'start_date': self.start_date,
+                        'end_date': self.end_date,
+                        'last_update': datetime.now().strftime('%Y-%m-%d'),
+                    })
+                dividend_ok = self.download_dividend_data(stock_code)
+                if daily_ok is None or dividend_ok is None:
+                    failed_stocks.append(stock_code)
+            else:
+                skipped += 1
+                time.sleep(0.02)
+        logger.info(f"本批次跳过已最新股票数量: {skipped}")
+        logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
+        return failed_stocks
