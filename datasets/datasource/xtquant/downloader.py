@@ -9,6 +9,30 @@ import json
 class XtquantDownloader(BaseDownloader):
     """Xtquant新版数据下载器"""
 
+    @staticmethod
+    def to_xtquant_code(code):
+        """
+        将各种常见股票代码格式（如 'sh600000', '600000.SH', '600000.sh', 'SH.600000', 'sh.600000', '600000' 等）
+        统一转换为 xtquant 标准格式 '000000.SH' 或 '000000.SZ'。
+        """
+        code = code.replace(' ', '').replace('-', '').replace('_', '').upper()
+        if '.' in code:
+            parts = code.split('.')
+            if len(parts[0]) == 2 and len(parts[1]) == 6:  # sh.600000
+                return f"{parts[1]}.{parts[0].upper()}"
+            elif len(parts[1]) == 2 and len(parts[0]) == 6:  # 600000.SH
+                return f"{parts[0]}.{parts[1].upper()}"
+            else:
+                # 其它情况，尽量容错
+                return f"{parts[-1].zfill(6)}.{parts[0][:2].upper()}"
+        elif code.startswith('SH') or code.startswith('SZ'):
+            return f"{code[2:].zfill(6)}.{code[:2]}"
+        elif code.startswith('SZ') or code.startswith('SH'):
+            return f"{code[2:].zfill(6)}.{code[:2]}"
+        else:
+            # 默认上证
+            return f"{code.zfill(6)}.SH"
+
     def __init__(
         self,
         config_path: str = None,
@@ -28,9 +52,12 @@ class XtquantDownloader(BaseDownloader):
             interval=interval,
             stock_codes=stock_codes
         )
+        # 统一所有股票代码格式为xtquant标准格式
         if self.stock_codes is None:
             stock_df = self.download_stock_list()
-            self.stock_codes = stock_df['code'].tolist()
+            self.stock_codes = [self.to_xtquant_code(code) for code in stock_df['code'].tolist()]
+        else:
+            self.stock_codes = [self.to_xtquant_code(code) for code in self.stock_codes]
         self.trade_dates = self.get_trade_dates(self.start_date, self.end_date)
         self.all_years = set(str(y) for y in range(int(self.start_date[:4]), int(self.end_date[:4]) + 1))
 
@@ -52,7 +79,8 @@ class XtquantDownloader(BaseDownloader):
             logger.info(f'股票列表已保存至: {file_path}')
         return stock_df
 
-    def get_trade_dates(self, start_date: str, end_date: str) -> set:
+    @staticmethod
+    def get_trade_dates(start_date: str, end_date: str) -> set:
         from datetime import datetime
         def ms_to_date(ms):
             return datetime.fromtimestamp(ms / 1000).strftime('%Y-%m-%d')
@@ -63,6 +91,8 @@ class XtquantDownloader(BaseDownloader):
         return sse_dates | szse_dates
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
+        # 再次确保传入的单只股票代码格式正确
+        stock_code = self.to_xtquant_code(stock_code)
         fields = self.config.get('fields', {}).get('daily', None)
         save_path = os.path.join(self.config.get('data_path', '../data/raw/xtquant'), 'daily', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_daily.csv')
@@ -109,23 +139,47 @@ class XtquantDownloader(BaseDownloader):
                 end_time=end_api,
                 incrementally=True
             )
+            # get_market_data_ex支持YYYYMMDD
             df = xtdata.get_market_data_ex([], [stock_code], period='1d', start_time=start_api, end_time=end_api, count=-1)
+            # xtdata.download_history_data2(stock_list=['000001.SH'], period='1d')
+            # df = xtdata.get_market_data(stock_list=['000001.SH'], period='1d')
             if isinstance(df, dict) and stock_code in df:
                 df = df[stock_code]
             if isinstance(df, pd.DataFrame):
-                if 'datetime' in df.columns:
-                    df.rename(columns={'datetime': 'date'}, inplace=True)
-                df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+                # 直接用'time'字段作为日期
+                if 'time' in df.columns:
+                    df.rename(columns={'time': 'date'}, inplace=True)
+                else:
+                    logger.warning(f"DataFrame columns: {df.columns.tolist()} for {stock_code} {rng}")
+                    logger.warning(f"DataFrame head:\n{df.head()}\n")
+                    raise KeyError("No 'time' column found in DataFrame columns!")
+                df['date'] = df['date'].astype(str)
                 # 字段筛选：只保留fields中指定的字段（含'date'）
                 if fields is not None:
-                    keep_cols = ['date'] + [f for f in fields.split(',') if f.strip() and f != 'date']
+                    if isinstance(fields, str):
+                        field_list = [f for f in fields.split(',') if f.strip() and f != 'date']
+                    elif isinstance(fields, list):
+                        field_list = [f for f in fields if f.strip() and f != 'date']
+                    else:
+                        field_list = []
+                    keep_cols = ['date'] + field_list
                     df = df[[col for col in keep_cols if col in df.columns]]
             return df
 
         def merge_dfs(dfs):
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
             if 'date' in df_new.columns:
-                df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
+                # 自动判断date字段格式
+                sample = df_new['date'].iloc[0] if not df_new.empty else ''
+                if isinstance(sample, (int, float)) or (isinstance(sample, str) and sample.isdigit() and len(sample) > 8):
+                    # 毫秒时间戳
+                    df_new['date'] = pd.to_datetime(df_new['date'].astype(float), unit='ms').dt.strftime('%Y-%m-%d')
+                elif isinstance(sample, str) and len(sample) == 8 and sample.isdigit():
+                    # 纯数字日期字符串
+                    df_new['date'] = pd.to_datetime(df_new['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+                else:
+                    # 其它情况，尝试自动解析
+                    df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
                 df_new = df_new.drop_duplicates(subset=['date']).sort_values('date')
             else:
                 df_new = df_new.drop_duplicates().sort_index()
@@ -156,6 +210,8 @@ class XtquantDownloader(BaseDownloader):
             return df_local
 
     def download_dividend_data(self, stock_code: str) -> pd.DataFrame:
+        # 再次确保传入的单只股票代码格式正确
+        stock_code = self.to_xtquant_code(stock_code)
         save_path = os.path.join(self.config.get('data_path', '../data/raw/xtquant'), 'dividend', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_dividend.csv')
         all_years = self.all_years

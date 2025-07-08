@@ -54,5 +54,5 @@ xtquant:
   #   class: XtquantConverter
   config:
     fields:
-      daily: [open, close, high, low, volume, amount]  # 你需要的字段
+      daily: [time, open, close, high, low, volume, amount]  # 包含time字段
       dividend: [dividend_year, cash_dividend, ...]    # 你需要的分红字段
