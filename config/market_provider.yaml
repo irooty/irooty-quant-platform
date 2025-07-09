@@ -8,7 +8,7 @@ common:
   end_date: null  # 默认结束日期，null表示当前日期
   download:
     concurrent_limit: 5  # 并发下载限制，暂时没有使用
-    min_request_interval: 0.5  # 最小请求间隔(秒)
+    min_request_interval: 0.1  # 最小请求间隔(秒)
     max_retries: 3  # 最大重试次数
     chunk_size: 1000  # 每批处理的股票数量
     compress: true  # 是否压缩存储

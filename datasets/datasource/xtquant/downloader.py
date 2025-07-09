@@ -91,6 +91,7 @@ class XtquantDownloader(BaseDownloader):
         return sse_dates | szse_dates
 
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
+        print(f'开始下载{stock_code}<UNK>')
         # 再次确保传入的单只股票代码格式正确
         stock_code = self.to_xtquant_code(stock_code)
         fields = self.config.get('fields', {}).get('daily', None)
@@ -129,6 +130,7 @@ class XtquantDownloader(BaseDownloader):
             return ranges
 
         def download_missing(rng):
+            print(f'时间段{rng}<UNK>')
             # 确保传递给xtquant API的日期为YYYYMMDD
             start_api = rng[0].replace('-', '')
             end_api = rng[1].replace('-', '')
@@ -179,6 +181,7 @@ class XtquantDownloader(BaseDownloader):
                     df_new['date'] = pd.to_datetime(df_new['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
                 else:
                     # 其它情况，尝试自动解析
+                    print(f"其它情况的日期格式{df_new['date']}")
                     df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
                 df_new = df_new.drop_duplicates(subset=['date']).sort_values('date')
             else:
