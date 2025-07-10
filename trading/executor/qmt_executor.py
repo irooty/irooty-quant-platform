@@ -1,161 +1,112 @@
-from xtquant.xtdata import XtDataApi
-from xtquant.xttrader import XtTrader
+# coding:utf-8
+import time, datetime, sys
+from xtquant import xtdata
+from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
+from xtquant.xttype import StockAccount
+from xtquant import xtconstant
 from .base_executor import BaseExecutor
 import pandas as pd
 from utils.logger import setup_logger
 
 logger = setup_logger("trade")
 
+class MyXtQuantTraderCallback(XtQuantTraderCallback):
+    """
+    自定义XtQuantTrader回调类。
+    用于处理交易相关的异步事件（如委托、成交、报错等），便于调试和日志追踪。
+    """
+    def on_disconnected(self):
+        """连接断开回调"""
+        print(datetime.datetime.now(), '连接断开回调')
+    def on_stock_order(self, order):
+        """委托回报推送回调"""
+        print(datetime.datetime.now(), '委托回调 投资备注', order.order_remark)
+    def on_stock_trade(self, trade):
+        """成交变动推送回调"""
+        print(datetime.datetime.now(), '成交回调', trade.order_remark, f"委托方向(48买 49卖) {trade.offset_flag} 成交价格 {trade.traded_price} 成交数量 {trade.traded_volume}")
+    def on_order_error(self, order_error):
+        """委托失败推送回调"""
+        print(f"委托报错回调 {order_error.order_remark} {order_error.error_msg}")
+    def on_cancel_error(self, cancel_error):
+        """撤单失败推送回调"""
+        print(datetime.datetime.now(), sys._getframe().f_code.co_name)
+    def on_order_stock_async_response(self, response):
+        """异步下单回报推送回调"""
+        print(f"异步委托回调 投资备注: {response.order_remark}")
+    def on_cancel_order_stock_async_response(self, response):
+        """异步撤单回报推送回调"""
+        print(datetime.datetime.now(), sys._getframe().f_code.co_name)
+    def on_account_status(self, status):
+        """账号状态变动回调"""
+        print(datetime.datetime.now(), sys._getframe().f_code.co_name)
+
 class QMTExecutor(BaseExecutor):
     """
-    QMT交易执行器
-    基于xtquant实现，封装了数据获取和交易下单功能
+    QMT交易执行器（xtquant原生下单实现）
+    封装了xtquant的交易对象初始化、行情获取、资金查询、下单等自动化流程。
+    用于自动化批量下单、策略交易等场景。
     """
-    
     def __init__(self):
-        self.data_api = XtDataApi()
-        self.data_api.start()
-        self.trader = XtTrader()
-        self.trader.start()
-        logger.info("QMT executor started.")
+        """
+        初始化QMTExecutor：
+        1. 指定QMT客户端路径、账号、session_id（建议后续通过配置传入）
+        2. 创建XtQuantTrader对象，注册回调，启动线程，连接交易服务器
+        3. 创建证券账号对象并订阅，确保后续可正常下单
+        """
+        # TODO: 路径、账号建议后续通过配置传入
+        self.path = r'F:\software\迅投极速交易终端睿智融科版\userdata'  # QMT客户端userdata路径
+        self.account_id = '2031065'  # 资金账号
+        self.session_id = int(time.time())  # session_id需唯一
+        self.xt_trader = XtQuantTrader(self.path, self.session_id)
+        self.callback = MyXtQuantTraderCallback()
+        self.xt_trader.register_callback(self.callback)
+        self.xt_trader.start()
+        connect_result = self.xt_trader.connect()
+        logger.info(f"建立交易连接，返回0表示连接成功: {connect_result}")
+        self.acc = StockAccount(self.account_id, 'STOCK')
+        subscribe_result = self.xt_trader.subscribe(self.acc)
+        logger.info(f"对交易回调进行订阅，返回0表示订阅成功: {subscribe_result}")
 
     def buy(self, stock_code, volume):
         """
-        买入股票
+        买入股票（自动获取行情和资金，按100股整数倍下单）
         Args:
-            stock_code: 股票代码
-            volume: 买入数量
+            stock_code (str): 股票代码（如 '600000.SH'）
+            volume (int/float): 期望买入股数（会根据资金和100股整数倍自动调整）
         Returns:
-            str: 订单号
+            str: 异步下单返回的订单ID（如资金不足则返回None）
         """
-        order_id = self.trader.place_order(
-            stock_code=stock_code,
-            price_type=4,
-            side=1,
-            order_volume=volume,
-            position_effect=1
+        # 获取最新行情
+        full_tick = xtdata.get_full_tick([stock_code])
+        current_price = full_tick[stock_code]['lastPrice']
+        # 获取资金
+        account_info = self.xt_trader.query_stock_asset(self.acc)
+        available_cash = account_info.m_dCash
+        # 计算买入金额和股数（按资金和100股整数倍自动调整）
+        buy_amount = min(volume * current_price, available_cash)
+        buy_vol = int(buy_amount / current_price / 100) * 100
+        if buy_vol <= 0:
+            logger.warning(f"可用资金不足，无法买入: {stock_code}")
+            return None
+        # 下单（异步委托，限价单，投资备注为strategy_name+股票代码）
+        order_id = self.xt_trader.order_stock_async(
+            self.acc, stock_code, xtconstant.STOCK_BUY, buy_vol, xtconstant.FIX_PRICE, current_price,
+            'strategy_name', stock_code
         )
-        logger.info(f"[QMT] 买入 {stock_code} {volume} 股，订单ID：{order_id}")
+        logger.info(f"[QMT] 买入 {stock_code} {buy_vol} 股，订单ID：{order_id}")
         return order_id
 
     def get_data_api(self):
         """
-        获取数据API对象
+        获取行情数据API（直接返回xtdata模块）
         Returns:
-            XtDataApi: xtquant数据API对象
+            xtdata: xtquant行情数据API
         """
-        return self.data_api
-
-    def get_klines(self, stock_code: str, period: str = '1d', count: int = None, 
-                   start_date: str = None, end_date: str = None) -> pd.DataFrame:
-        """
-        获取K线数据（xtquant实现）
-        将xtquant的API差异封装在内部，返回统一的DataFrame格式
-        
-        Args:
-            stock_code: 股票代码
-            period: 数据周期 ('1d', '1min', '5min', '15min', '30min', '1h', '1w', '1m', '1q', '1y')
-            count: 获取条数
-            start_date: 开始日期 (YYYY-MM-DD格式)
-            end_date: 结束日期 (YYYY-MM-DD格式)
-            
-        Returns:
-            pd.DataFrame: 统一格式的K线数据
-                columns: ['date', 'open', 'close', 'high', 'low', 'volume', 'amount']
-                date列: YYYY-MM-DD格式字符串
-                numeric列: float类型
-                按日期升序排列
-        """
-        try:
-            # 根据参数选择不同的API调用方式
-            if count is not None:
-                # 按条数获取
-                raw_data = self.data_api.get_market_data(stock_code, period, count=count)
-            else:
-                # 按日期范围获取
-                if start_date and end_date:
-                    # 转换为xtquant需要的格式
-                    start_str = start_date.replace('-', '')
-                    end_str = end_date.replace('-', '')
-                    raw_data = self.data_api.get_market_data(stock_code, period, 
-                                                           start_time=start_str, end_time=end_str)
-                else:
-                    # 默认获取最近20条数据
-                    raw_data = self.data_api.get_market_data(stock_code, period, count=20)
-            
-            # 转换为DataFrame
-            if isinstance(raw_data, dict):
-                # 如果是字典格式，提取数据
-                df = pd.DataFrame(raw_data)
-            elif isinstance(raw_data, list):
-                # 如果是列表格式
-                df = pd.DataFrame(raw_data)
-            else:
-                # 其他格式，尝试直接转换
-                df = pd.DataFrame(raw_data)
-            
-            if df.empty:
-                logger.warning(f"获取K线数据为空：{stock_code}")
-                return pd.DataFrame()
-            
-            # 统一列名
-            column_mapping = {
-                'time': 'date',
-                'datetime': 'date',
-                'open_price': 'open',
-                'close_price': 'close',
-                'high_price': 'high',
-                'low_price': 'low',
-                'vol': 'volume',
-                'volume': 'volume',
-                'amount': 'amount'
-            }
-            
-            for old_col, new_col in column_mapping.items():
-                if old_col in df.columns and new_col not in df.columns:
-                    df.rename(columns={old_col: new_col}, inplace=True)
-            
-            # 确保必要的列存在
-            required_cols = ['date', 'open', 'close', 'high', 'low', 'volume']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                logger.warning(f"K线数据缺少必要列：{missing_cols}，股票：{stock_code}")
-                return pd.DataFrame()
-            
-            # 数据类型转换
-            numeric_cols = ['open', 'close', 'high', 'low', 'volume']
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 处理amount列（如果存在）
-            if 'amount' in df.columns:
-                df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
-            else:
-                # 如果没有amount列，根据volume和价格计算
-                df['amount'] = df['volume'] * (df['open'] + df['close']) / 2
-            
-            # 统一date列格式
-            df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-            
-            # 按日期排序
-            df = df.sort_values('date')
-            
-            # 选择并排序列
-            final_cols = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount']
-            df = df[final_cols]
-            
-            logger.info(f"[QMT] 获取K线数据成功：{stock_code} {len(df)}条")
-            return df
-            
-        except Exception as e:
-            logger.error(f"获取K线数据失败：{stock_code}，错误：{e}")
-            return pd.DataFrame()
+        return xtdata
 
     def stop(self):
         """
-        停止执行器，释放资源
+        停止执行器，释放交易对象资源
         """
-        self.trader.stop()
-        self.data_api.stop()
+        self.xt_trader.stop()
         logger.info("QMT executor stopped.")
