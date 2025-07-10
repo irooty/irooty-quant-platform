@@ -4,8 +4,8 @@ executor:
   class: MockExecutor
 # 策略方法
 strategy:
-  module: strategies.simple_strategy
-  function: should_buy
+  module: strategies.base_strategy
+  function: always_buy
 # 自选股票列表
-watchlist_path: data/watchlist.csv
+watchlist_path: data/live_trading/watchlist.csv
 volume: 100
