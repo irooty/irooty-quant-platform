@@ -21,6 +21,8 @@ import time
 from datetime import datetime
 import backoff
 from utils.path_utils import get_config_path, load_config
+from utils.logger import setup_logger
+logger = setup_logger("base_downloader")
 
 class BaseDownloader(ABC):
     def __init__(
@@ -186,38 +188,43 @@ class BaseDownloader(ABC):
 
     @staticmethod
     def incremental_update(df_local, target_set, get_local_set_fn, download_missing_fn, merge_fn, split_ranges_fn=None):
-        """
-        通用增量补齐逻辑：
-        1. 计算本地已有集合
-        2. 计算缺失集合
-        3. 分段下载缺失数据
-        4. 合并、去重、返回新数据
-        Args:
-            df_local: 本地DataFrame
-            target_set: 目标集合（如所有交易日、所有年份等，set类型）
-            get_local_set_fn: 从本地数据提取集合的函数，返回set
-            download_missing_fn: 下载缺失区间的函数，参数为区间（如日期段、年份等），返回DataFrame
-            merge_fn: 合并去重函数，参数为DataFrame列表，返回合并后的DataFrame
-            split_ranges_fn: 可选，将缺失集合分为连续区间的函数，返回区间列表
-        Returns:
-            DataFrame: 合并后的新数据（如果没有缺失则返回本地数据，调用方应判断数据是否有变化再保存）
-        """
+        import time
+        # 1. 计算本地已有集合
+        t0 = time.time()
         local_set = get_local_set_fn(df_local) if df_local is not None else set()
+        t1 = time.time()
+        logger.info(f"[incremental_update] get_local_set_fn耗时: {t1 - t0:.3f}秒")
+
+        # 2. 计算缺失集合
         missing = sorted(list(target_set - local_set))
         if not missing:
             return df_local
-        # 分段
+
+        # 3. 分段
         if split_ranges_fn:
+            t2 = time.time()
             ranges = split_ranges_fn(missing)
+            t3 = time.time()
+            logger.info(f"[incremental_update] split_ranges_fn耗时: {t3 - t2:.3f}秒")
         else:
             ranges = [(v, v) for v in missing]
+
+        # 4. 下载缺失数据
         dfs = []
         for rng in ranges:
+            t4 = time.time()
             df = download_missing_fn(rng)
+            t5 = time.time()
+            logger.info(f"[incremental_update] download_missing_fn({rng})耗时: {t5 - t4:.3f}秒")
             if df is not None and not df.empty:
                 dfs.append(df)
+
+        # 5. 合并去重
         if dfs:
+            t6 = time.time()
             df_new = merge_fn([df_local] + dfs)
+            t7 = time.time()
+            logger.info(f"[incremental_update] merge_fn耗时: {t7 - t6:.3f}秒")
             return df_new
         else:
             return df_local
@@ -280,7 +287,6 @@ class BaseDownloader(ABC):
         import time
         chunk_size = self.config.get('download', {}).get('chunk_size', 1000)
         total_stocks = len(self.stock_codes)
-        from loguru import logger
         logger.info(f'开始处理 {total_stocks} 支股票的数据...')
 
         status = self.load_status()
@@ -316,7 +322,6 @@ class BaseDownloader(ABC):
     def _download_stock_data(self, chunk, failed_stocks, to_download_set):
         from tqdm import tqdm
         import time
-        from loguru import logger
         skipped = 0
         for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
             if stock_code in to_download_set:
@@ -333,7 +338,7 @@ class BaseDownloader(ABC):
                     failed_stocks.append(stock_code)
             else:
                 skipped += 1
-                time.sleep(0.02)
+                time.sleep(0.02) # 避免时间太短不更新进度条
         logger.info(f"本批次跳过已最新股票数量: {skipped}")
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         return failed_stocks
