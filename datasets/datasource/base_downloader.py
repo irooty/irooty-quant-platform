@@ -27,8 +27,8 @@ logger = setup_logger("base_downloader")
 class DownloadDispatcher:
     """
     DownloadDispatcher 负责 interval 类型到具体下载方法的注册与分发。
-    
-    用法：
+
+    用法示例：
         # 在子类文件顶部定义 register 别名
         register = BaseDownloader.download_dispatcher.register
 
@@ -37,19 +37,19 @@ class DownloadDispatcher:
         def download_daily_data(self, stock_code):
             ...
 
-    如果调用 download 时找不到 interval 对应的方法，会抛出 NotImplementedError，
-    并提示如何添加和注册新类型的方法。
+    主流程调用：
+        self.download_dispatcher.download(self, stock_code, interval)
     """
     def __init__(self):
         self.download_methods = {}
     def register(self, interval):
         def decorator(func):
-            self.download_methods[interval] = func
+            self.download_methods[interval] = func.__name__
             return func
         return decorator
-    def download(self, stock_code, interval, *args, **kwargs):
-        method = self.download_methods.get(interval)
-        if method is None:
+    def download(self, instance, stock_code, interval, *args, **kwargs):
+        method_name = self.download_methods.get(interval)
+        if method_name is None:
             msg = (
                 f"未找到 interval '{interval}' 的下载方法。\n"
                 f"请在你的Downloader子类中实现并用@register('{interval}')装饰器注册，如：\n"
@@ -57,13 +57,14 @@ class DownloadDispatcher:
             )
             logger.warning(msg)
             raise NotImplementedError(msg)
+        method = getattr(instance, method_name)
         return method(stock_code, *args, **kwargs)
 
 class CompletenessChecker:
     """
     CompletenessChecker 负责 interval/data_type 到完整性检查方法的注册与分发。
-    
-    用法：
+
+    用法示例：
         # 在子类文件顶部定义 checker_register 别名
         checker_register = BaseDownloader.completeness_checker.register
 
@@ -71,18 +72,22 @@ class CompletenessChecker:
         @checker_register('1d')
         def check_1d_complete(self, stock_code, **kwargs):
             ...
+
+    主流程调用：
+        self.completeness_checker.is_complete(self, stock_code, data_type, **kwargs)
     """
     def __init__(self):
         self.checkers = {}
     def register(self, data_type):
         def decorator(func):
-            self.checkers[data_type] = func
+            self.checkers[data_type] = func.__name__
             return func
         return decorator
     def is_complete(self, instance, stock_code, data_type, **kwargs):
-        checker = self.checkers.get(data_type)
-        if checker is not None:
-            return checker(instance, stock_code, **kwargs)
+        method_name = self.checkers.get(data_type)
+        if method_name is not None:
+            method = getattr(instance, method_name)
+            return method(stock_code, **kwargs)
         msg = (
             f"未找到数据类型 '{data_type}' 的完整性检查方法。\n"
             f"请在你的Downloader子类中实现并用@checker_register('{data_type}')装饰器注册，如：\n"
@@ -354,10 +359,7 @@ class BaseDownloader(ABC):
         )
 
     def is_data_complete(self, stock_code, data_type, **kwargs):
-        checker = self.completeness_checker.checkers.get(data_type)
-        if checker is not None:
-            return checker(self, stock_code, **kwargs)
-        return False
+        return self.completeness_checker.is_complete(self, stock_code, data_type, **kwargs)
 
     def batch_download(self) -> None:
         from tqdm import tqdm
@@ -398,7 +400,7 @@ class BaseDownloader(ABC):
         for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
             if stock_code in to_download_set:
                 try:
-                    self.download_dispatcher.download(stock_code, interval)
+                    self.download_dispatcher.download(self, stock_code, interval)
                 except NotImplementedError as e:
                     logger.warning(str(e))
                     failed_stocks.append(stock_code)
