@@ -26,7 +26,7 @@ def main(
       --convert      是否转换为Qlib格式，布尔值
       --stock-codes  要下载的股票列表，支持逗号分隔字符串（如 sh.600000,sz.000001），
                      或文件路径（如 codes.txt，每行一个或逗号分隔）
-      --interval     数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
+      --interval     数据类型，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y、dividend，默认1d表示日数据
     """
     # 添加项目根目录到Python路径
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

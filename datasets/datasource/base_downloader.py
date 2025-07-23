@@ -24,7 +24,77 @@ from utils.path_utils import get_config_path, load_config
 from utils.logger import setup_logger
 logger = setup_logger("base_downloader")
 
+class DownloadDispatcher:
+    """
+    DownloadDispatcher 负责 interval 类型到具体下载方法的注册与分发。
+    
+    用法：
+        # 在子类文件顶部定义 register 别名
+        register = BaseDownloader.download_dispatcher.register
+
+        # 在子类中用装饰器注册方法
+        @register('1d')
+        def download_daily_data(self, stock_code):
+            ...
+
+    如果调用 download 时找不到 interval 对应的方法，会抛出 NotImplementedError，
+    并提示如何添加和注册新类型的方法。
+    """
+    def __init__(self):
+        self.download_methods = {}
+    def register(self, interval):
+        def decorator(func):
+            self.download_methods[interval] = func
+            return func
+        return decorator
+    def download(self, stock_code, interval, *args, **kwargs):
+        method = self.download_methods.get(interval)
+        if method is None:
+            msg = (
+                f"未找到 interval '{interval}' 的下载方法。\n"
+                f"请在你的Downloader子类中实现并用@register('{interval}')装饰器注册，如：\n"
+                f"    @register('{interval}')\n    def download_{interval}_data(self, stock_code): ..."
+            )
+            logger.warning(msg)
+            raise NotImplementedError(msg)
+        return method(stock_code, *args, **kwargs)
+
+class CompletenessChecker:
+    """
+    CompletenessChecker 负责 interval/data_type 到完整性检查方法的注册与分发。
+    
+    用法：
+        # 在子类文件顶部定义 checker_register 别名
+        checker_register = BaseDownloader.completeness_checker.register
+
+        # 在子类中用装饰器注册方法
+        @checker_register('1d')
+        def check_1d_complete(self, stock_code, **kwargs):
+            ...
+    """
+    def __init__(self):
+        self.checkers = {}
+    def register(self, data_type):
+        def decorator(func):
+            self.checkers[data_type] = func
+            return func
+        return decorator
+    def is_complete(self, instance, stock_code, data_type, **kwargs):
+        checker = self.checkers.get(data_type)
+        if checker is not None:
+            return checker(instance, stock_code, **kwargs)
+        msg = (
+            f"未找到数据类型 '{data_type}' 的完整性检查方法。\n"
+            f"请在你的Downloader子类中实现并用@checker_register('{data_type}')装饰器注册，如：\n"
+            f"    @checker_register('{data_type}')\n    def check_{data_type}_complete(self, stock_code, **kwargs): ..."
+        )
+        logger.warning(msg)
+        raise NotImplementedError(msg)
+
 class BaseDownloader(ABC):
+    download_dispatcher = DownloadDispatcher()  # 类属性，供装饰器注册
+    completeness_checker = CompletenessChecker()  # 类属性，供装饰器注册
+
     def __init__(
         self,
         config_path: str = None,
@@ -186,45 +256,68 @@ class BaseDownloader(ABC):
             return pd.read_csv(file_path)
         return pd.DataFrame()
 
-    @staticmethod
-    def incremental_update(df_local, target_set, get_local_set_fn, download_missing_fn, merge_fn, split_ranges_fn=None):
-        import time
-        # 1. 计算本地已有集合
-        t0 = time.time()
-        local_set = get_local_set_fn(df_local) if df_local is not None else set()
-        t1 = time.time()
-        logger.info(f"[incremental_update] get_local_set_fn耗时: {t1 - t0:.3f}秒")
+    def incremental_download(
+        self,
+        stock_code,
+        target_set,
+        get_local_set_fn,
+        download_missing_fn,
+        merge_fn,
+        save_path,
+        file_path,
+        metadata_fn,
+        split_ranges_fn=None,
+        status_type=None
+    ):
+        """
+        通用的增量下载流程，适用于日线、分红、分钟线等多种类型
+        """
+        # 1. 读取本地数据
+        if os.path.exists(file_path):
+            df_local = pd.read_csv(file_path)
+            if df_local.empty:
+                df_local = pd.DataFrame()
+        else:
+            df_local = pd.DataFrame()
 
-        # 2. 计算缺失集合
+        # 2. 计算本地已有集合
+        local_set = get_local_set_fn(df_local) if df_local is not None else set()
         missing = sorted(list(target_set - local_set))
         if not missing:
             return df_local
 
         # 3. 分段
         if split_ranges_fn:
-            t2 = time.time()
             ranges = split_ranges_fn(missing)
-            t3 = time.time()
-            logger.info(f"[incremental_update] split_ranges_fn耗时: {t3 - t2:.3f}秒")
         else:
             ranges = [(v, v) for v in missing]
 
         # 4. 下载缺失数据
         dfs = []
         for rng in ranges:
-            t4 = time.time()
             df = download_missing_fn(rng)
-            t5 = time.time()
-            logger.info(f"[incremental_update] download_missing_fn({rng})耗时: {t5 - t4:.3f}秒")
             if df is not None and not df.empty:
                 dfs.append(df)
 
         # 5. 合并去重
         if dfs:
-            t6 = time.time()
             df_new = merge_fn([df_local] + dfs)
-            t7 = time.time()
-            logger.info(f"[incremental_update] merge_fn耗时: {t7 - t6:.3f}秒")
+        else:
+            df_new = df_local
+
+        # 6. 保存数据和元数据
+        if not df_new.empty:
+            os.makedirs(save_path, exist_ok=True)
+            metadata = metadata_fn(df_new)
+            self._save_with_metadata(df_new, file_path, metadata)
+            # 7. 状态更新
+            if status_type:
+                self.update_status(stock_code, status_type, {
+                    'status': 'done',
+                    'start_date': getattr(self, 'start_date', None),
+                    'end_date': getattr(self, 'end_date', None),
+                    'last_update': datetime.now().strftime('%Y-%m-%d'),
+                })
             return df_new
         else:
             return df_local
@@ -260,27 +353,11 @@ class BaseDownloader(ABC):
             status[stock_code][data_type].get('status') == 'done'
         )
 
-    def is_daily_data_up_to_date(self, stock_code, target_start=None, target_end=None):
-        if target_start is None:
-            target_start = self.start_date
-        if target_end is None:
-            target_end = self.end_date
-        status = self.load_status()
-        info = status.get(stock_code, {}).get('daily', {})
-        if info.get('status') != 'done':
-            return False
-        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
-
-    def is_dividend_data_up_to_date(self, stock_code, target_years=None):
-        if target_years is None:
-            target_years = self.all_years
-        status = self.load_status()
-        info = status.get(stock_code, {}).get('dividend', {})
-        if info.get('status') != 'done':
-            return False
-        if info.get('has_dividend') == False:
-            return True
-        return set(info.get('years', [])) >= set(target_years)
+    def is_data_complete(self, stock_code, data_type, **kwargs):
+        checker = self.completeness_checker.checkers.get(data_type)
+        if checker is not None:
+            return checker(self, stock_code, **kwargs)
+        return False
 
     def batch_download(self) -> None:
         from tqdm import tqdm
@@ -292,18 +369,12 @@ class BaseDownloader(ABC):
         status = self.load_status()
         use_status = bool(status)
         to_download = set()
+        interval = self.interval
 
-        if use_status:
-            for stock_code in tqdm(self.stock_codes, desc="检查进度", total=total_stocks):
-                need_download = False
-                if not self.is_daily_data_up_to_date(stock_code):
-                    need_download = True
-                if not self.is_dividend_data_up_to_date(stock_code):
-                    need_download = True
-                if need_download:
-                    to_download.add(stock_code)
-        else:
-            to_download = set(self.stock_codes)
+        # 只判断当前 interval 类型的数据是否需要下载
+        for stock_code in tqdm(self.stock_codes, desc="检查进度", total=total_stocks):
+            if not self.is_data_complete(stock_code, interval):
+                to_download.add(stock_code)
 
         if not to_download:
             logger.info("所有股票数据均为最新，无需下载。")
@@ -323,18 +394,13 @@ class BaseDownloader(ABC):
         from tqdm import tqdm
         import time
         skipped = 0
+        interval = self.interval
         for stock_code in tqdm(chunk, desc="下载进度", total=len(chunk)):
             if stock_code in to_download_set:
-                daily_ok = self.download_daily_data(stock_code)
-                if daily_ok is not None:
-                    self.update_status(stock_code, 'daily', {
-                        'status': 'done',
-                        'start_date': self.start_date,
-                        'end_date': self.end_date,
-                        'last_update': datetime.now().strftime('%Y-%m-%d'),
-                    })
-                dividend_ok = self.download_dividend_data(stock_code)
-                if daily_ok is None or dividend_ok is None:
+                try:
+                    self.download_dispatcher.download(stock_code, interval)
+                except NotImplementedError as e:
+                    logger.warning(str(e))
                     failed_stocks.append(stock_code)
             else:
                 skipped += 1
@@ -342,3 +408,18 @@ class BaseDownloader(ABC):
         logger.info(f"本批次跳过已最新股票数量: {skipped}")
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         return failed_stocks
+
+    @staticmethod
+    def verify_completeness(file_path, target_set, get_local_set_fn, desc=""):
+        import os
+        if not os.path.exists(file_path):
+            logger.warning(f"{desc}文件不存在: {file_path}")
+            return []
+        df = pd.read_csv(file_path)
+        local_set = get_local_set_fn(df)
+        missing = sorted(list(target_set - local_set))
+        if missing:
+            logger.warning(f"{desc}缺失{len(missing)}项: {missing[:10]} ...")
+        else:
+            logger.info(f"{desc}完整性校验通过，无缺失。")
+        return missing

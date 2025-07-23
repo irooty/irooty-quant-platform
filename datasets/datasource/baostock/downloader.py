@@ -13,8 +13,10 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 from typing import List, Dict, Optional, Any
-from ..base_downloader import BaseDownloader
+from datasets.datasource.base_downloader import BaseDownloader
 
+register = BaseDownloader.download_dispatcher.register
+checker_register = BaseDownloader.completeness_checker.register
 
 class BaostockDownloader(BaseDownloader):
     """Baostock数据下载器
@@ -138,35 +140,20 @@ class BaostockDownloader(BaseDownloader):
             return set(df[df['is_trading_day'] == '1']['calendar_date'])
         return set()
 
+    @register('1d')
     def download_daily_data(self, stock_code: str) -> pd.DataFrame:
         """下载单个股票的日线数据，按交易日增量补齐"""
-
         fields = self.config.get('fields', {}).get('daily')
-
         save_path = os.path.join(self.config.get('data_path', '../data/raw/baostock'), 'daily', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_daily.csv')
-        metadata_path = f"{file_path}.meta"
-
-        # 1. 获取目标区间的所有交易日（用缓存）
         trade_dates = self.trade_dates
 
-        # 2. 读取本地数据
-        if os.path.exists(file_path):
-            df_local = pd.read_csv(file_path)
-            if df_local.empty or 'date' not in df_local.columns:
-                df_local = pd.DataFrame()
-        else:
-            df_local = pd.DataFrame()
-
-        # 3. 定义辅助函数
         def get_local_dates(df):
-            """ 提取已有数据中的交易日集合（格式化为 YYYY-MM-DD）"""
             if df is None or df.empty or 'date' not in df.columns:
                 return set()
             return set(pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d'))
 
         def split_into_ranges(dates):
-            """ 将缺失交易日划分为连续区间段（例如：[(2024-01-01, 2024-01-03), (2024-01-05, 2024-01-05)]） """
             if not dates:
                 return []
             from datetime import datetime, timedelta
@@ -185,7 +172,6 @@ class BaostockDownloader(BaseDownloader):
             return ranges
 
         def download_missing(rng):
-            """从 Baostock 下载指定区间的数据"""
             rs = self._make_request(
                 self.bs.query_history_k_data_plus,
                 code=stock_code,
@@ -198,7 +184,6 @@ class BaostockDownloader(BaseDownloader):
             return self._process_result(rs)
 
         def merge_dfs(dfs):
-            """合并多个 DataFrame，按日期去重、排序"""
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
             if 'date' in df_new.columns:
                 df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
@@ -207,20 +192,8 @@ class BaostockDownloader(BaseDownloader):
                 df_new = df_new.drop_duplicates().sort_index()
             return df_new
 
-        # 4. 增量补齐
-        df_new = self.incremental_update(
-            df_local,
-            trade_dates,
-            get_local_dates,
-            download_missing,
-            merge_dfs,
-            split_ranges_fn=split_into_ranges
-        )
-
-        # 5. 保存数据并更新元数据
-        if not df_new.empty:
-            os.makedirs(save_path, exist_ok=True)
-            metadata = {
+        def metadata_fn(df_new):
+            return {
                 'stock_code': stock_code,
                 'start_date': self.start_date,
                 'end_date': self.end_date,
@@ -228,32 +201,31 @@ class BaostockDownloader(BaseDownloader):
                 'record_count': len(df_new),
                 'fields': list(df_new.columns)
             }
-            self._save_with_metadata(df_new, file_path, metadata)
-            return df_new
-        else:
-            return df_local
 
+        df_result = self.incremental_download(
+            stock_code=stock_code,
+            target_set=trade_dates,
+            get_local_set_fn=get_local_dates,
+            download_missing_fn=download_missing,
+            merge_fn=merge_dfs,
+            save_path=save_path,
+            file_path=file_path,
+            metadata_fn=metadata_fn,
+            split_ranges_fn=split_into_ranges,
+            status_type='daily'
+        )
+        # 完整性校验
+        self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}日线")
+        return df_result
+
+    @register('dividend')
     def download_dividend_data(self, stock_code: str) -> pd.DataFrame:
         """下载分红数据，按年份增量补齐"""
-
         fields = self.config.get('fields', {}).get('dividend')
-
         save_path = os.path.join(self.config.get('data_path', '../data/raw/baostock'), 'dividend', stock_code)
         file_path = os.path.join(save_path, f'{stock_code}_dividend.csv')
-        metadata_path = f"{file_path}.meta"
-
-        # 1. 计算目标年份集合（用缓存）
         all_years = self.all_years
 
-        # 2. 读取本地数据
-        if os.path.exists(file_path):
-            df_local = pd.read_csv(file_path)
-            if df_local.empty:
-                df_local = pd.DataFrame()
-        else:
-            df_local = pd.DataFrame()
-
-        # 3. 定义辅助函数
         def get_local_years(df):
             if df is None or df.empty:
                 return set()
@@ -278,32 +250,18 @@ class BaostockDownloader(BaseDownloader):
 
         def merge_dfs(dfs):
             df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
-            # 确保year列存在
             if 'dividend_year' in df_new.columns:
                 df_new['year'] = df_new['dividend_year']
             elif 'year' not in df_new.columns and 'report_date' in df_new.columns:
                 df_new['year'] = df_new['report_date'].astype(str).str[:4]
-
-            # 安全排序：如果year列存在则按year排序，否则按索引排序
             if 'year' in df_new.columns:
                 df_new = df_new.drop_duplicates().sort_values('year')
             else:
                 df_new = df_new.drop_duplicates().sort_index()
             return df_new
 
-        # 4. 增量补齐
-        df_new = self.incremental_update(
-            df_local,
-            all_years,
-            get_local_years,
-            download_missing_year,
-            merge_dfs
-        )
-
-        # 5. 保存数据并更新元数据
-        if not df_new.empty:
-            os.makedirs(save_path, exist_ok=True)
-            metadata = {
+        def metadata_fn(df_new):
+            return {
                 'stock_code': stock_code,
                 'start_date': self.start_date,
                 'end_date': self.end_date,
@@ -311,21 +269,115 @@ class BaostockDownloader(BaseDownloader):
                 'record_count': len(df_new),
                 'fields': list(df_new.columns)
             }
-            self._save_with_metadata(df_new, file_path, metadata)
-            # 有分红数据
-            self.update_status(stock_code, 'dividend', {
-                'status': 'done',
-                'years': list(self.all_years),
-                'has_dividend': True,
-                'last_update': datetime.now().strftime('%Y-%m-%d'),
-            })
+
+        return self.incremental_download(
+            stock_code=stock_code,
+            target_set=all_years,
+            get_local_set_fn=get_local_years,
+            download_missing_fn=download_missing_year,
+            merge_fn=merge_dfs,
+            save_path=save_path,
+            file_path=file_path,
+            metadata_fn=metadata_fn,
+            split_ranges_fn=None,
+            status_type='dividend'
+        )
+
+    @register('1min')
+    def download_1min_data(self, stock_code: str) -> pd.DataFrame:
+        """下载单个股票的1分钟数据，按交易日增量补齐"""
+        fields = self.config.get('fields', {}).get('1min')
+        save_path = os.path.join(self.config.get('data_path', '../data/raw/baostock'), '1min', stock_code)
+        file_path = os.path.join(save_path, f'{stock_code}_1min.csv')
+        trade_dates = self.trade_dates
+
+        def get_local_dates(df):
+            if df is None or df.empty or 'date' not in df.columns:
+                return set()
+            return set(pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d'))
+
+        def split_into_ranges(dates):
+            if not dates:
+                return []
+            from datetime import datetime, timedelta
+            dates = [datetime.strptime(d, '%Y-%m-%d') for d in dates]
+            dates.sort()
+            ranges = []
+            start = dates[0]
+            end = dates[0]
+            for d in dates[1:]:
+                if (d - end).days == 1:
+                    end = d
+                else:
+                    ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
+                    start = end = d
+            ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
+            return ranges
+
+        def download_missing(rng):
+            rs = self._make_request(
+                self.bs.query_history_k_data_plus,
+                code=stock_code,
+                fields=fields,
+                start_date=rng[0],
+                end_date=rng[1],
+                frequency='1min',
+                adjustflag='3'
+            )
+            return self._process_result(rs)
+
+        def merge_dfs(dfs):
+            df_new = pd.concat([df for df in dfs if df is not None and not df.empty], ignore_index=True)
+            if 'date' in df_new.columns:
+                df_new['date'] = pd.to_datetime(df_new['date']).dt.strftime('%Y-%m-%d')
+                df_new = df_new.drop_duplicates(subset=['date']).sort_values('date')
+            else:
+                df_new = df_new.drop_duplicates().sort_index()
             return df_new
-        else:
-            # 无分红数据
-            self.update_status(stock_code, 'dividend', {
-                'status': 'done',
-                'years': list(self.all_years),
-                'has_dividend': False,
-                'last_update': datetime.now().strftime('%Y-%m-%d'),
-            })
-            return df_local
+
+        def metadata_fn(df_new):
+            return {
+                'stock_code': stock_code,
+                'start_date': self.start_date,
+                'end_date': self.end_date,
+                'download_date': datetime.now().isoformat(),
+                'record_count': len(df_new),
+                'fields': list(df_new.columns)
+            }
+
+        df_result = self.incremental_download(
+            stock_code=stock_code,
+            target_set=trade_dates,
+            get_local_set_fn=get_local_dates,
+            download_missing_fn=download_missing,
+            merge_fn=merge_dfs,
+            save_path=save_path,
+            file_path=file_path,
+            metadata_fn=metadata_fn,
+            split_ranges_fn=split_into_ranges,
+            status_type='1min'
+        )
+        # 完整性校验
+        self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}1分钟")
+        return df_result
+
+    @checker_register('1d')
+    def check_1d_complete(self, stock_code, **kwargs):
+        status = self.load_status()
+        target_start = kwargs.get('target_start', self.start_date)
+        target_end = kwargs.get('target_end', self.end_date)
+        info = status.get(stock_code, {}).get('daily', {})
+        if info.get('status') != 'done':
+            return False
+        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
+
+    @checker_register('dividend')
+    def check_dividend_complete(self, stock_code, **kwargs):
+        status = self.load_status()
+        target_years = kwargs.get('target_years', getattr(self, 'all_years', None))
+        info = status.get(stock_code, {}).get('dividend', {})
+        if info.get('status') != 'done':
+            return False
+        if info.get('has_dividend') == False:
+            return True
+        return set(info.get('years', [])) >= set(target_years)
