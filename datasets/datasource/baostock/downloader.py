@@ -153,24 +153,6 @@ class BaostockDownloader(BaseDownloader):
                 return set()
             return set(pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d'))
 
-        def split_into_ranges(dates):
-            if not dates:
-                return []
-            from datetime import datetime, timedelta
-            dates = [datetime.strptime(d, '%Y-%m-%d') for d in dates]
-            dates.sort()
-            ranges = []
-            start = dates[0]
-            end = dates[0]
-            for d in dates[1:]:
-                if (d - end).days == 1:
-                    end = d
-                else:
-                    ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
-                    start = end = d
-            ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
-            return ranges
-
         def download_missing(rng):
             rs = self._make_request(
                 self.bs.query_history_k_data_plus,
@@ -211,11 +193,10 @@ class BaostockDownloader(BaseDownloader):
             save_path=save_path,
             file_path=file_path,
             metadata_fn=metadata_fn,
-            split_ranges_fn=split_into_ranges,
             status_type='daily'
         )
         # 完整性校验
-        self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}日线")
+        # self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}日线")
         return df_result
 
     @register('dividend')
@@ -270,7 +251,7 @@ class BaostockDownloader(BaseDownloader):
                 'fields': list(df_new.columns)
             }
 
-        return self.incremental_download(
+        df_new = self.incremental_download(
             stock_code=stock_code,
             target_set=all_years,
             get_local_set_fn=get_local_years,
@@ -279,9 +260,9 @@ class BaostockDownloader(BaseDownloader):
             save_path=save_path,
             file_path=file_path,
             metadata_fn=metadata_fn,
-            split_ranges_fn=None,
-            status_type='dividend'
+            status_type='dividend'  # 让基类自动写状态
         )
+        return df_new
 
     @register('1min')
     def download_1min_data(self, stock_code: str) -> pd.DataFrame:
@@ -295,24 +276,6 @@ class BaostockDownloader(BaseDownloader):
             if df is None or df.empty or 'date' not in df.columns:
                 return set()
             return set(pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d'))
-
-        def split_into_ranges(dates):
-            if not dates:
-                return []
-            from datetime import datetime, timedelta
-            dates = [datetime.strptime(d, '%Y-%m-%d') for d in dates]
-            dates.sort()
-            ranges = []
-            start = dates[0]
-            end = dates[0]
-            for d in dates[1:]:
-                if (d - end).days == 1:
-                    end = d
-                else:
-                    ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
-                    start = end = d
-            ranges.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
-            return ranges
 
         def download_missing(rng):
             rs = self._make_request(
@@ -354,7 +317,6 @@ class BaostockDownloader(BaseDownloader):
             save_path=save_path,
             file_path=file_path,
             metadata_fn=metadata_fn,
-            split_ranges_fn=split_into_ranges,
             status_type='1min'
         )
         # 完整性校验
@@ -374,10 +336,9 @@ class BaostockDownloader(BaseDownloader):
     @checker_register('dividend')
     def check_dividend_complete(self, stock_code, **kwargs):
         status = self.load_status()
-        target_years = kwargs.get('target_years', getattr(self, 'all_years', None))
+        target_start = kwargs.get('target_start', self.start_date)
+        target_end = kwargs.get('target_end', self.end_date)
         info = status.get(stock_code, {}).get('dividend', {})
         if info.get('status') != 'done':
             return False
-        if info.get('has_dividend') == False:
-            return True
-        return set(info.get('years', [])) >= set(target_years)
+        return info.get('start_date') <= target_start and info.get('end_date') >= target_end

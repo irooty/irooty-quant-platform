@@ -13,7 +13,7 @@ def main(
     end_date: str = None,    # 结束日期，格式：YYYY-MM-DD
     convert: bool = False,   # 是否转换为Qlib格式
     stock_codes: str = None,  # 要下载的股票列表，支持逗号分隔字符串或文件路径（如.txt，每行一个或逗号分隔）
-    interval: str = '1d'     # 数据间隔，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y，默认1d表示日数据
+    interval: str = '1d'     # 数据类型，支持1min、5min、15min、30min、1h、1d、1w、1m、1q、1y、dividend，默认1d表示日数据
 ):
     """
     股票数据下载工具

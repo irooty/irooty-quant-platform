@@ -209,11 +209,13 @@ irooty-quant-platform/
   # 默认下载 2010-01-01至今所有股票数据
   python scripts/fetch_data.py --provider=baostock
   # 下载自定义股票列表
-  python scripts/fetch_data.py --provider=baostock --stock-list=sh.600000,sz.000001
+  python scripts/fetch_data.py --provider=baostock --stock-codes=sh.600000,sz.000001
   # 下载自定义股票列表
-  python scripts/fetch_data.py --provider=baostock --stock-codes data/stock_list/custom.txt
+  python scripts/fetch_data.py --provider=baostock --stock-codes=data/stock_list/custom.txt
+  # 下载自定义股票列表分红数据
+  python scripts/fetch_data.py --provider=baostock --stock-codes=data/stock_list/custom.txt --interval=dividend
   # 下载单只股票指定时间范围内的数据
-  python scripts/fetch_data.py --provider=baostock --convert --start-date=2020-01-01 --end-date=2021-01-01 --stock-list=sh.600000
+  python scripts/fetch_data.py --provider=baostock --convert --start-date=2020-01-01 --end-date=2021-01-01 --stock-codes=sh.600000
 ```
 
 ---

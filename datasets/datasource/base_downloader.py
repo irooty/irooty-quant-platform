@@ -96,6 +96,18 @@ class CompletenessChecker:
         logger.warning(msg)
         raise NotImplementedError(msg)
 
+class StepTimer:
+    def __init__(self, enable=False, prefix=""):
+        self.enable = enable
+        self.prefix = prefix
+        self.last = time.time()
+    def step(self, name):
+        if not self.enable:
+            return
+        now = time.time()
+        print(f"[TIMER] {self.prefix}{name} 耗时: {now - self.last:.3f} 秒")
+        self.last = now
+
 class BaseDownloader(ABC):
     download_dispatcher = DownloadDispatcher()  # 类属性，供装饰器注册
     completeness_checker = CompletenessChecker()  # 类属性，供装饰器注册
@@ -135,6 +147,8 @@ class BaseDownloader(ABC):
         # 优化：统一计算start_date、end_date
         self.start_date = self.start_date or self.config.get('start_date', '2010-01-01')
         self.end_date = self.end_date or self.config.get('end_date') or datetime.now().strftime('%Y-%m-%d')
+        # 新增：从配置文件读取计时开关
+        self.enable_timing = self.config.get('download', {}).get('enable_timing', False)
 
     @staticmethod
     def _load_config(config_path: Optional[str], provider: str) -> Dict[str, Any]:
@@ -271,12 +285,13 @@ class BaseDownloader(ABC):
         save_path,
         file_path,
         metadata_fn,
-        split_ranges_fn=None,
         status_type=None
     ):
         """
-        通用的增量下载流程，适用于日线、分红、分钟线等多种类型
+        通用的增量下载流程，适用于日线、分红、分钟线等多种类型。
+        只发起一次API请求，直接请求缺失区间的最小值到最大值。
         """
+        timer = StepTimer(enable=getattr(self, 'enable_timing', False), prefix="incremental_download: ")
         # 1. 读取本地数据
         if os.path.exists(file_path):
             df_local = pd.read_csv(file_path)
@@ -284,38 +299,35 @@ class BaseDownloader(ABC):
                 df_local = pd.DataFrame()
         else:
             df_local = pd.DataFrame()
+        timer.step("读取本地数据")
 
         # 2. 计算本地已有集合
         local_set = get_local_set_fn(df_local) if df_local is not None else set()
+        timer.step("计算本地已有集合")
         missing = sorted(list(target_set - local_set))
+        timer.step("计算缺失")
         if not missing:
             return df_local
 
-        # 3. 分段
-        if split_ranges_fn:
-            ranges = split_ranges_fn(missing)
-        else:
-            ranges = [(v, v) for v in missing]
+        # 3. 整块下载
+        start_date, end_date = min(missing), max(missing)
+        # print(f"[TIMER] incremental_download: 整块下载区间: ({start_date}, {end_date})")
+        df = download_missing_fn((start_date, end_date))
+        timer.step("下载缺失数据")
 
-        # 4. 下载缺失数据
-        dfs = []
-        for rng in ranges:
-            df = download_missing_fn(rng)
-            if df is not None and not df.empty:
-                dfs.append(df)
-
-        # 5. 合并去重
-        if dfs:
-            df_new = merge_fn([df_local] + dfs)
+        # 4. 合并去重
+        if df is not None and not df.empty:
+            df_new = merge_fn([df_local, df])
         else:
             df_new = df_local
+        timer.step("合并去重")
 
-        # 6. 保存数据和元数据
+        # 5. 保存数据和元数据
         if not df_new.empty:
             os.makedirs(save_path, exist_ok=True)
             metadata = metadata_fn(df_new)
             self._save_with_metadata(df_new, file_path, metadata)
-            # 7. 状态更新
+            # 6. 更新状态
             if status_type:
                 self.update_status(stock_code, status_type, {
                     'status': 'done',
@@ -323,6 +335,7 @@ class BaseDownloader(ABC):
                     'end_date': getattr(self, 'end_date', None),
                     'last_update': datetime.now().strftime('%Y-%m-%d'),
                 })
+            timer.step("保存数据和元数据")
             return df_new
         else:
             return df_local

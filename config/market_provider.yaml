@@ -12,6 +12,7 @@ common:
     max_retries: 3  # 最大重试次数
     chunk_size: 1000  # 每批处理的股票数量
     compress: true  # 是否压缩存储
+    enable_timing: false  # 是否启用方法执行计时
 
 # Baostock配置
 baostock:
