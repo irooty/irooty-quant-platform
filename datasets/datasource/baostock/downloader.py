@@ -1,22 +1,12 @@
 import os
-import threading
 
 import baostock as bs
 import pandas as pd
 from datetime import datetime, timedelta
 from loguru import logger
-import time
-import json
-import hashlib  # 用于计算文件哈希值
-import backoff  # 用于实现指数退避重试机制
-from joblib import Parallel, delayed
-from tqdm import tqdm
-
-from typing import List, Dict, Optional, Any
 from datasets.datasource.base_downloader import BaseDownloader
 
 register = BaseDownloader.download_dispatcher.register
-checker_register = BaseDownloader.completeness_checker.register
 
 class BaostockDownloader(BaseDownloader):
     """Baostock数据下载器
@@ -193,7 +183,7 @@ class BaostockDownloader(BaseDownloader):
             save_path=save_path,
             file_path=file_path,
             metadata_fn=metadata_fn,
-            status_type='daily'
+            status_type='1d'
         )
         # 完整性校验
         # self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}日线")
@@ -322,23 +312,3 @@ class BaostockDownloader(BaseDownloader):
         # 完整性校验
         self.verify_completeness(file_path, trade_dates, get_local_dates, desc=f"{stock_code}1分钟")
         return df_result
-
-    @checker_register('1d')
-    def check_1d_complete(self, stock_code, **kwargs):
-        status = self.load_status()
-        target_start = kwargs.get('target_start', self.start_date)
-        target_end = kwargs.get('target_end', self.end_date)
-        info = status.get(stock_code, {}).get('daily', {})
-        if info.get('status') != 'done':
-            return False
-        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
-
-    @checker_register('dividend')
-    def check_dividend_complete(self, stock_code, **kwargs):
-        status = self.load_status()
-        target_start = kwargs.get('target_start', self.start_date)
-        target_end = kwargs.get('target_end', self.end_date)
-        info = status.get(stock_code, {}).get('dividend', {})
-        if info.get('status') != 'done':
-            return False
-        return info.get('start_date') <= target_start and info.get('end_date') >= target_end

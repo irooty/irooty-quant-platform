@@ -13,16 +13,18 @@ BaseDownloader: 通用数据下载器基类
 """
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Union
-import os
 import json
 import hashlib
 import pandas as pd
 import time
 from datetime import datetime
 import backoff
-from utils.path_utils import get_config_path, load_config
+# 统一路径操作工具，避免直接用os.path
+import utils.path_utils as path_utils
 from utils.logger import setup_logger
+
 logger = setup_logger("base_downloader")
+
 
 class DownloadDispatcher:
     """
@@ -40,13 +42,17 @@ class DownloadDispatcher:
     主流程调用：
         self.download_dispatcher.download(self, stock_code, interval)
     """
+
     def __init__(self):
         self.download_methods = {}
+
     def register(self, interval):
         def decorator(func):
             self.download_methods[interval] = func.__name__
             return func
+
         return decorator
+
     def download(self, instance, stock_code, interval, *args, **kwargs):
         method_name = self.download_methods.get(interval)
         if method_name is None:
@@ -60,47 +66,13 @@ class DownloadDispatcher:
         method = getattr(instance, method_name)
         return method(stock_code, *args, **kwargs)
 
-class CompletenessChecker:
-    """
-    CompletenessChecker 负责 interval/data_type 到完整性检查方法的注册与分发。
-
-    用法示例：
-        # 在子类文件顶部定义 checker_register 别名
-        checker_register = BaseDownloader.completeness_checker.register
-
-        # 在子类中用装饰器注册方法
-        @checker_register('1d')
-        def check_1d_complete(self, stock_code, **kwargs):
-            ...
-
-    主流程调用：
-        self.completeness_checker.is_complete(self, stock_code, data_type, **kwargs)
-    """
-    def __init__(self):
-        self.checkers = {}
-    def register(self, data_type):
-        def decorator(func):
-            self.checkers[data_type] = func.__name__
-            return func
-        return decorator
-    def is_complete(self, instance, stock_code, data_type, **kwargs):
-        method_name = self.checkers.get(data_type)
-        if method_name is not None:
-            method = getattr(instance, method_name)
-            return method(stock_code, **kwargs)
-        msg = (
-            f"未找到数据类型 '{data_type}' 的完整性检查方法。\n"
-            f"请在你的Downloader子类中实现并用@checker_register('{data_type}')装饰器注册，如：\n"
-            f"    @checker_register('{data_type}')\n    def check_{data_type}_complete(self, stock_code, **kwargs): ..."
-        )
-        logger.warning(msg)
-        raise NotImplementedError(msg)
 
 class StepTimer:
     def __init__(self, enable=False, prefix=""):
         self.enable = enable
         self.prefix = prefix
         self.last = time.time()
+
     def step(self, name):
         if not self.enable:
             return
@@ -108,19 +80,19 @@ class StepTimer:
         print(f"[TIMER] {self.prefix}{name} 耗时: {now - self.last:.3f} 秒")
         self.last = now
 
+
 class BaseDownloader(ABC):
     download_dispatcher = DownloadDispatcher()  # 类属性，供装饰器注册
-    completeness_checker = CompletenessChecker()  # 类属性，供装饰器注册
 
     def __init__(
-        self,
-        config_path: str = None,
-        provider: str = None,
-        start_date: str = None,
-        end_date: str = None,
-        convert: bool = False,
-        interval: str = '1d',
-        stock_codes: list = None
+            self,
+            config_path: str = None,
+            provider: str = None,
+            start_date: str = None,
+            end_date: str = None,
+            convert: bool = False,
+            interval: str = '1d',
+            stock_codes: list = None
     ):
         """
         初始化通用参数，加载配置
@@ -153,42 +125,42 @@ class BaseDownloader(ABC):
     @staticmethod
     def _load_config(config_path: Optional[str], provider: str) -> Dict[str, Any]:
         """加载配置文件，合并通用配置和数据源专属配置
-        
+
         配置合并规则：
         1. 以通用配置为基础
         2. 数据源专属配置覆盖通用配置
         3. 如果专属配置未指定data_path，则使用通用配置的data_path/{market_provider}
-        
+
         Args:
             config_path: 配置文件路径
             provider: 金融数据提供方
-            
+
         Returns:
             Dict[str, Any]: 合并后的配置
         """
         if config_path is None:
             # 使用统一配置加载方法
-            full_config = load_config('market_provider.yaml')
+            full_config = path_utils.load_config('market_provider.yaml')
         else:
             # 如果提供了具体路径，使用path_utils的方法
-            config_file = get_config_path(config_path)
-            if not os.path.exists(config_file):
+            config_file = path_utils.get_config_path(config_path)
+            if not path_utils.safe_exists(config_file):
                 raise FileNotFoundError(f"配置文件不存在: {config_file}")
-            full_config = load_config(config_path)
-            
+            full_config = path_utils.load_config(config_path)
+
         # 1. 获取通用配置
         common_config = full_config.get('common', {})
-        
+
         # 2. 获取数据源专属配置
         provider_config = full_config.get(provider, {}).get('config', {})
-        
+
         # 3. 合并配置（从下到上覆盖）
         config = common_config.copy()  # 以通用配置为基础
         config.update(provider_config)  # 专属配置覆盖通用配置
 
         # 4. 特殊处理data_path
         if not provider_config.get('data_path'):
-            config['data_path'] = os.path.join(common_config.get('data_path', 'data/raw'), provider)
+            config['data_path'] = path_utils.safe_join(common_config.get('data_path', 'data/raw'), provider)
         return config
 
     @staticmethod
@@ -204,7 +176,7 @@ class BaseDownloader(ABC):
         if isinstance(stock_codes, list):
             return stock_codes
         if isinstance(stock_codes, str):
-            if os.path.isfile(stock_codes):
+            if path_utils.safe_isfile(stock_codes):
                 codes = []
                 with open(stock_codes, 'r', encoding='utf-8') as f:
                     for line in f:
@@ -242,7 +214,7 @@ class BaseDownloader(ABC):
         """
         计算文件哈希值（MD5），用于数据完整性校验
         """
-        if not os.path.exists(file_path):
+        if not path_utils.safe_exists(file_path):
             return ""
         with open(file_path, 'rb') as f:
             return hashlib.md5(f.read()).hexdigest()
@@ -271,21 +243,21 @@ class BaseDownloader(ABC):
         """
         加载csv为DataFrame
         """
-        if os.path.exists(file_path):
+        if path_utils.safe_exists(file_path):
             return pd.read_csv(file_path)
         return pd.DataFrame()
 
     def incremental_download(
-        self,
-        stock_code,
-        target_set,
-        get_local_set_fn,
-        download_missing_fn,
-        merge_fn,
-        save_path,
-        file_path,
-        metadata_fn,
-        status_type=None
+            self,
+            stock_code,
+            target_set,
+            get_local_set_fn,
+            download_missing_fn,
+            merge_fn,
+            save_path,
+            file_path,
+            metadata_fn,
+            status_type=None
     ):
         """
         通用的增量下载流程，适用于日线、分红、分钟线等多种类型。
@@ -293,7 +265,7 @@ class BaseDownloader(ABC):
         """
         timer = StepTimer(enable=getattr(self, 'enable_timing', False), prefix="incremental_download: ")
         # 1. 读取本地数据
-        if os.path.exists(file_path):
+        if path_utils.safe_exists(file_path):
             df_local = pd.read_csv(file_path)
             if df_local.empty:
                 df_local = pd.DataFrame()
@@ -324,7 +296,7 @@ class BaseDownloader(ABC):
 
         # 5. 保存数据和元数据
         if not df_new.empty:
-            os.makedirs(save_path, exist_ok=True)
+            path_utils.safe_makedirs(save_path, exist_ok=True)
             metadata = metadata_fn(df_new)
             self._save_with_metadata(df_new, file_path, metadata)
             # 6. 更新状态
@@ -341,18 +313,19 @@ class BaseDownloader(ABC):
             return df_local
 
     def _status_file(self):
-        return os.path.join(self.config.get('data_path', f'../data/raw/{self.provider}'), 'download_status.json')
+        return path_utils.safe_join(self.config.get('data_path', path_utils.safe_join(f'../data/raw', self.provider)),
+                                    'download_status.json')
 
     def load_status(self):
         status_file = self._status_file()
-        if os.path.exists(status_file):
+        if path_utils.safe_exists(status_file):
             with open(status_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return {}
 
     def save_status(self, status):
         status_file = self._status_file()
-        os.makedirs(os.path.dirname(status_file), exist_ok=True)
+        path_utils.safe_makedirs(path_utils.safe_dirname(status_file), exist_ok=True)
         with open(status_file, 'w', encoding='utf-8') as f:
             json.dump(status, f, ensure_ascii=False, indent=2)
 
@@ -363,16 +336,14 @@ class BaseDownloader(ABC):
         status[stock_code][data_type] = status_info
         self.save_status(status)
 
-    def is_data_downloaded(self, stock_code, data_type):
+    def is_data_downloaded(self, stock_code, status_type, **kwargs):
         status = self.load_status()
-        return (
-            stock_code in status and
-            data_type in status[stock_code] and
-            status[stock_code][data_type].get('status') == 'done'
-        )
-
-    def is_data_complete(self, stock_code, data_type, **kwargs):
-        return self.completeness_checker.is_complete(self, stock_code, data_type, **kwargs)
+        info = status.get(stock_code, {}).get(status_type, {})
+        target_start = kwargs.get('target_start', self.start_date)
+        target_end = kwargs.get('target_end', self.end_date)
+        if info.get('status') != 'done':
+            return False
+        return info.get('start_date') <= target_start and info.get('end_date') >= target_end
 
     def batch_download(self) -> None:
         from tqdm import tqdm
@@ -388,7 +359,7 @@ class BaseDownloader(ABC):
 
         # 只判断当前 interval 类型的数据是否需要下载
         for stock_code in tqdm(self.stock_codes, desc="检查进度", total=total_stocks):
-            if not self.is_data_complete(stock_code, interval):
+            if not self.is_data_downloaded(stock_code, interval):
                 to_download.add(stock_code)
 
         if not to_download:
@@ -419,15 +390,14 @@ class BaseDownloader(ABC):
                     failed_stocks.append(stock_code)
             else:
                 skipped += 1
-                time.sleep(0.02) # 避免时间太短不更新进度条
+                time.sleep(0.02)  # 避免时间太短不更新进度条
         logger.info(f"本批次跳过已最新股票数量: {skipped}")
         logger.info(f"下载失败的股票数量: {len(failed_stocks)}")
         return failed_stocks
 
     @staticmethod
     def verify_completeness(file_path, target_set, get_local_set_fn, desc=""):
-        import os
-        if not os.path.exists(file_path):
+        if not path_utils.safe_exists(file_path):
             logger.warning(f"{desc}文件不存在: {file_path}")
             return []
         df = pd.read_csv(file_path)
