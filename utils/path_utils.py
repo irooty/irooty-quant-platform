@@ -10,6 +10,28 @@ def get_project_root():
     project_root = os.path.dirname(os.path.abspath(__file__))
     return os.path.abspath(os.path.join(project_root, ".."))
 
+# 通用路径操作工具
+
+def safe_join(*args):
+    """安全拼接路径，等价于os.path.join"""
+    return os.path.join(*args)
+
+def safe_exists(path):
+    """判断路径是否存在，等价于os.path.exists"""
+    return os.path.exists(path)
+
+def safe_makedirs(path, exist_ok=True):
+    """安全创建多级目录，等价于os.makedirs"""
+    os.makedirs(path, exist_ok=exist_ok)
+
+def safe_dirname(path):
+    """获取路径的目录部分，等价于os.path.dirname"""
+    return os.path.dirname(path)
+
+def safe_isfile(path):
+    """判断路径是否为文件，等价于os.path.isfile"""
+    return os.path.isfile(path)
+
 def get_config_path(config_name):
     """
     获取配置文件的绝对路径。
