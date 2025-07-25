@@ -261,6 +261,24 @@ python scripts/daily_run.py
 
 ---
 
+### 9. 在项目环境下运行 notebook
+
+#### 启动 Jupyter Lab/Notebook
+确保你已激活项目的虚拟环境（如 .venv），然后运行：
+
+```bash
+# 启动 Jupyter Lab
+jupyter lab
+
+# 或启动 Jupyter Notebook
+jupyter notebook
+```
+#### 在浏览器中打开 notebooks/深度学习策略.ipynb
+- 进入 notebooks 目录，点击 xxx.ipynb 打开。
+- 你可以直接运行、编辑、调试 notebook 里的所有代码单元。
+
+---
+
 ### 📌 小贴士
 
 - 所有路径和配置参数集中于 `config/` 目录下；

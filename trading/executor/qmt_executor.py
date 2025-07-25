@@ -54,7 +54,7 @@ class QMTExecutor(BaseExecutor):
         3. 创建证券账号对象并订阅，确保后续可正常下单
         """
         # TODO: 路径、账号建议后续通过配置传入
-        self.path = r'F:\software\迅投极速交易终端睿智融科版\userdata'  # QMT客户端userdata路径
+        self.path = r'D:\software\迅投极速交易终端睿智融科版\userdata'  # QMT客户端userdata路径
         self.account_id = '2031065'  # 资金账号
         self.session_id = int(time.time())  # session_id需唯一
         self.xt_trader = XtQuantTrader(self.path, self.session_id)

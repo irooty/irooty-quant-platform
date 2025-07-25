@@ -53,6 +53,18 @@ class DownloadDispatcher:
 
         return decorator
 
+    def check(self, interval):
+        """判断是否已注册某个interval的下载方法，未注册时自动logger.warning并返回False"""
+        if interval in self.download_methods:
+            return True
+        msg = (
+            f"未找到 interval '{interval}' 的下载方法。\n"
+            f"请在你的Downloader子类中实现并用@register('{interval}')装饰器注册，如：\n"
+            f"    @register('{interval}')\n    def download_{interval}_data(self, stock_code): ..."
+        )
+        logger.warning(msg)
+        return False
+
     def download(self, instance, stock_code, interval, *args, **kwargs):
         method_name = self.download_methods.get(interval)
         if method_name is None:
@@ -351,6 +363,10 @@ class BaseDownloader(ABC):
         chunk_size = self.config.get('download', {}).get('chunk_size', 1000)
         total_stocks = len(self.stock_codes)
         logger.info(f'开始处理 {total_stocks} 支股票的数据...')
+
+        # 提前检查是否注册了下载方法
+        if not self.download_dispatcher.check(self.interval):
+            return
 
         status = self.load_status()
         use_status = bool(status)
